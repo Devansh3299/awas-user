@@ -1,9 +1,13 @@
-import { IsNotEmpty, IsString, IsOptional, IsObject } from 'class-validator';
+import { IsNotEmpty, IsString, IsOptional, IsObject, IsNumber, IsPositive } from 'class-validator';
 
 export class CreateAgentDto {
   @IsString()
   @IsNotEmpty()
   name: string;
+
+  @IsString()
+  @IsOptional()
+  mastraId?: string;
 
   @IsString()
   @IsOptional()
@@ -16,4 +20,13 @@ export class CreateAgentDto {
   @IsString()
   @IsOptional()
   version?: string;
+
+  @IsNumber()
+  @IsPositive()
+  @IsOptional()
+  price?: number;
+
+  @IsString()
+  @IsOptional()
+  username?: string;
 }

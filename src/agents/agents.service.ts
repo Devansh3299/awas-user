@@ -10,10 +10,7 @@ export class AgentsService {
   async create(createAgentDto: CreateAgentDto) {
     const { schema, ...data } = createAgentDto;
     return this.prisma.agent.create({
-      data: {
-        ...data,
-        schema: schema ?? {},
-      },
+      data: { ...data, schema: schema ?? {} },
     });
   }
 
@@ -22,37 +19,32 @@ export class AgentsService {
   }
 
   async findOne(id: string) {
-    const agent = await this.prisma.agent.findUnique({
-      where: { id },
-    });
-    if (!agent) {
-      throw new NotFoundException(`Agent with ID ${id} not found`);
-    }
+    const agent = await this.prisma.agent.findUnique({ where: { id } });
+    if (!agent) throw new NotFoundException(`Agent with ID ${id} not found`);
+    return agent;
+  }
+
+  async findByMastraId(mastraId: string) {
+    const agent = await this.prisma.agent.findUnique({ where: { mastraId } });
+    if (!agent) throw new NotFoundException(`Agent with mastraId ${mastraId} not found`);
     return agent;
   }
 
   async update(id: string, updateAgentDto: UpdateAgentDto) {
     const { schema, ...data } = updateAgentDto;
     const updateData: any = { ...data };
-    if (schema) {
-      updateData.schema = schema;
-    }
+    if (schema) updateData.schema = schema;
     try {
-      return await this.prisma.agent.update({
-        where: { id },
-        data: updateData,
-      });
-    } catch (e) {
+      return await this.prisma.agent.update({ where: { id }, data: updateData });
+    } catch {
       throw new NotFoundException(`Agent with ID ${id} not found`);
     }
   }
 
   async remove(id: string) {
     try {
-      return await this.prisma.agent.delete({
-        where: { id },
-      });
-    } catch (e) {
+      return await this.prisma.agent.delete({ where: { id } });
+    } catch {
       throw new NotFoundException(`Agent with ID ${id} not found`);
     }
   }

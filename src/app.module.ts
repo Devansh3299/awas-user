@@ -5,9 +5,11 @@ import { PrismaModule } from './prisma/prisma.module';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { AgentsModule } from './agents/agents.module';
+import { AiProxyModule } from './ai-proxy/ai-proxy.module';
+import { TokensModule } from './tokens/tokens.module';
 
 @Module({
-  imports: [PrismaModule, UsersModule, AuthModule, AgentsModule],
+  imports: [PrismaModule, UsersModule, AuthModule, AgentsModule, AiProxyModule, TokensModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -1,9 +1,13 @@
-import { IsOptional, IsString, IsObject } from 'class-validator';
+import { IsOptional, IsString, IsObject, IsNumber, IsPositive } from 'class-validator';
 
 export class UpdateAgentDto {
   @IsString()
   @IsOptional()
   name?: string;
+
+  @IsString()
+  @IsOptional()
+  mastraId?: string;
 
   @IsString()
   @IsOptional()
@@ -16,4 +20,13 @@ export class UpdateAgentDto {
   @IsString()
   @IsOptional()
   version?: string;
+
+  @IsNumber()
+  @IsPositive()
+  @IsOptional()
+  price?: number;
+
+  @IsString()
+  @IsOptional()
+  username?: string;
 }
