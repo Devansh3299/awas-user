@@ -10,7 +10,9 @@ export class TokensService {
     if (!user) {
       throw new NotFoundException(`User ${userId} not found`);
     }
-    return user.tokenBalance ?? 0;
+
+    const balance = Number(user.tokenBalance ?? 0);
+    return Number.isFinite(balance) ? balance : 0;
   }
 
   async deductTokens(userId: string, amount: number): Promise<void> {

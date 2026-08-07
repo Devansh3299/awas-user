@@ -15,6 +15,24 @@ export class AiProxyController {
   }
 
   @UseGuards(JwtAuthGuard)
+  @Get('studio-chat')
+  async studioChat(@Req() req: Request, @Res() res: Response) {
+    const agents = await this.aiProxyService.listAgents();
+    res.status(200).json(agents);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('agents/:id')
+  async getAgentById(
+    @Param('id') agentId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const mastraResponse = await this.aiProxyService.proxyRequest(req, `/api/agents/${agentId}`);
+    res.status(mastraResponse.status).json(mastraResponse.data);
+  }
+
+  @UseGuards(JwtAuthGuard)
   @Post('agents/:id/generate')
   @HttpCode(HttpStatus.OK)
   async generate(
@@ -76,6 +94,14 @@ export class AiProxyController {
     @Res() res: Response,
   ) {
     const mastraResponse = await this.aiProxyService.proxyRequest(req, `/api/memory/threads/${threadId}/messages`);
+    res.status(mastraResponse.status).json(mastraResponse.data);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('logs')
+  async getLogs(@Req() req: Request, @Res() res: Response) {
+    const transportId = (req.query as any).transportId ?? 'default';
+    const mastraResponse = await this.aiProxyService.proxyRequest(req, `/api/logs?transportId=${transportId}`);
     res.status(mastraResponse.status).json(mastraResponse.data);
   }
 }

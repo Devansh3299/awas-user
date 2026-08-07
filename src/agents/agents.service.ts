@@ -25,9 +25,17 @@ export class AgentsService {
   }
 
   async findByMastraId(mastraId: string) {
-    const agent = await this.prisma.agent.findUnique({ where: { mastraId } });
-    if (!agent) throw new NotFoundException(`Agent with mastraId ${mastraId} not found`);
-    return agent;
+    const agent = await this.prisma.agent.findMany({
+      where: {
+        OR: [{ id: mastraId }, { name: mastraId }],
+      },
+    });
+
+    if (!agent.length) {
+      throw new NotFoundException(`Agent with mastraId ${mastraId} not found`);
+    }
+
+    return agent[0];
   }
 
   async update(id: string, updateAgentDto: UpdateAgentDto) {

@@ -10,6 +10,27 @@ interface MastraResponse {
   data: any;
 }
 
+export function normalizeAgentExecutionBody(body: any) {
+  const messages = body?.messages;
+  const incomingThreadId = body?.threadId ?? body?.memory?.thread;
+  const incomingResourceId = body?.resourceId ?? body?.memory?.resource ?? 'default-user';
+
+  if (!messages) {
+    return body;
+  }
+
+  const { threadId, resourceId, ...rest } = body;
+
+  return {
+    ...rest,
+    memory: {
+      ...(body?.memory ?? {}),
+      thread: incomingThreadId,
+      resource: incomingResourceId,
+    },
+  };
+}
+
 @Injectable()
 export class AiProxyService {
   constructor(
@@ -18,7 +39,22 @@ export class AiProxyService {
   ) {}
 
   async listAgents() {
-    return this.prisma.agent.findMany();
+    try {
+      const response = await fetch(`${MASTRA_BASE_URL}/api/agents`, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        return [];
+      }
+
+      const data = await response.json();
+      return Array.isArray(data) ? data : Object.values(data ?? {});
+    } catch (err) {
+      throw new BadRequestException(`Failed to reach Mastra service: ${err.message}`);
+    }
   }
 
   async deductTokens(userId: string): Promise<void> {
@@ -46,7 +82,8 @@ export class AiProxyService {
       }
     }
 
-    const forwardBody = method !== 'GET' && method !== 'HEAD' ? req.body : undefined;
+    const rawBody = method !== 'GET' && method !== 'HEAD' ? req.body : undefined;
+    const forwardBody = rawBody ? normalizeAgentExecutionBody(rawBody) : undefined;
 
     let response: Response;
     try {
