@@ -65,6 +65,44 @@ export class AiProxyService {
     return this.tokensService.hasSufficientBalance(userId, requiredTokens);
   }
 
+  /**
+   * Initiates a streaming request to the Mastra engine and returns the raw
+   * fetch Response so the controller can pipe response.body directly to Express.
+   */
+  async streamRequest(req: Request, agentId: string, userId: string): Promise<Response> {
+    const url = `${MASTRA_BASE_URL}/api/agents/${agentId}/stream`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      'x-user-id': userId,
+    };
+
+    // Forward optional context headers
+    const forwardHeaders = ['x-user-tier', 'x-tenant-id', 'x-execution-mode', 'x-allow-commands'];
+    for (const h of forwardHeaders) {
+      const val = req.headers[h];
+      if (val) {
+        headers[h] = Array.isArray(val) ? val.join(', ') : val;
+      }
+    }
+
+    const rawBody = req.body ? normalizeAgentExecutionBody(req.body) : {};
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(rawBody),
+      });
+    } catch (err) {
+      throw new BadRequestException(`Failed to reach Mastra service: ${err.message}`);
+    }
+
+    return response;
+  }
+
   async proxyRequest(req: Request, overridePath?: string): Promise<MastraResponse> {
     const targetPath = overridePath ?? this.mapAiToMastraPath(req.url);
     const url = `${MASTRA_BASE_URL}${targetPath}`;
