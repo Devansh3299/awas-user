@@ -60,8 +60,13 @@ export class AiProxyController {
       return;
     }
 
+    const abortController = new AbortController();
+    req.on('close', () => {
+      abortController.abort();
+    });
+
     // Always stream — call Mastra's /stream endpoint and pipe SSE directly
-    const mastraResponse = await this.aiProxyService.streamRequest(req, agentId, userId);
+    const mastraResponse = await this.aiProxyService.streamRequest(req, agentId, userId, abortController.signal);
 
     // Set SSE headers before anything else
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -101,7 +106,10 @@ export class AiProxyController {
         res.end();
       });
 
-      req.on('close', () => nodeStream.destroy());
+      req.on('close', () => {
+        abortController.abort();
+        nodeStream.destroy();
+      });
 
     } else {
       // ── JSON response from Mastra: synthesise SSE tokens from the text ──

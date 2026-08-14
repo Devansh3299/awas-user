@@ -69,7 +69,7 @@ export class AiProxyService {
    * Initiates a streaming request to the Mastra engine and returns the raw
    * fetch Response so the controller can pipe response.body directly to Express.
    */
-  async streamRequest(req: Request, agentId: string, userId: string): Promise<Response> {
+  async streamRequest(req: Request, agentId: string, userId: string, signal?: AbortSignal): Promise<Response> {
     const url = `${MASTRA_BASE_URL}/api/agents/${agentId}/stream`;
 
     const headers: Record<string, string> = {
@@ -95,6 +95,7 @@ export class AiProxyService {
         method: 'POST',
         headers,
         body: JSON.stringify(rawBody),
+        signal,
       });
     } catch (err) {
       throw new BadRequestException(`Failed to reach Mastra service: ${err.message}`);
