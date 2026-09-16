@@ -8,12 +8,13 @@ generator client {
 }
 
 model User {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  email        String   @unique
+  id           String     @id @default(auto()) @map("_id") @db.ObjectId
+  email        String     @unique
   passwordHash String
-  role         String   @default("user")
-  tokenBalance Int      @default(100)
-  createdAt    DateTime @default(now())
+  role         String     @default("user")
+  tokenBalance Int        @default(100)
+  workflows    Workflow[]
+  createdAt    DateTime   @default(now())
 }
 
 model Agent {
@@ -24,3 +25,20 @@ model Agent {
   version     String   @default("1.0.0")
   createdAt   DateTime @default(now())
 }
+
+model Workflow {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  workflowId  String   @unique   // frontend wf-xxx ID
+  name        String
+  description String?  @default("")
+  nodes       Json     @default("[]")
+  edges       Json     @default("[]")
+  userId      String   @db.ObjectId
+  user        User     @relation(fields: [userId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("workflow")
+}
+
+
