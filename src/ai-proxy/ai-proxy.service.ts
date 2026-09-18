@@ -12,22 +12,29 @@ interface MastraResponse {
 
 export function normalizeAgentExecutionBody(body: any) {
   const messages = body?.messages;
-  const incomingThreadId = body?.threadId ?? body?.memory?.thread;
-  const incomingResourceId = body?.resourceId ?? body?.memory?.resource ?? 'default-user';
-
   if (!messages) {
     return body;
   }
 
-  const { threadId, resourceId, ...rest } = body;
+  const incomingThreadId = body?.threadId ?? body?.memory?.thread;
+  const incomingResourceId = body?.resourceId ?? body?.memory?.resource ?? 'default-user';
+  const { threadId, resourceId, memory, ...rest } = body;
+
+  if (incomingThreadId) {
+    return {
+      ...rest,
+      threadId: incomingThreadId,
+      resourceId: incomingResourceId,
+      memory: {
+        ...(memory ?? {}),
+        thread: incomingThreadId,
+        resource: incomingResourceId,
+      },
+    };
+  }
 
   return {
     ...rest,
-    memory: {
-      ...(body?.memory ?? {}),
-      thread: incomingThreadId,
-      resource: incomingResourceId,
-    },
   };
 }
 
@@ -66,20 +73,59 @@ export class AiProxyService {
   }
 
   /**
+   * Resolves the active LLM connection for the user, defaulting to local LM Studio with google/gemma-3-4b.
+   */
+  private async getUserLlmContext(userId?: string) {
+    if (userId) {
+      try {
+        const conn =
+          (await this.prisma.llmConnection.findFirst({
+            where: { userId, isDefault: true, isEnabled: true },
+          })) ||
+          (await this.prisma.llmConnection.findFirst({
+            where: { userId, providerId: 'lm-studio', isEnabled: true },
+          }));
+
+        if (conn) {
+          return {
+            providerId: conn.providerId,
+            modelId: conn.modelId || 'google/gemma-3-4b',
+            baseUrl: conn.baseUrl || 'http://127.0.0.1:1234/v1',
+            apiKey: conn.apiKey ? Buffer.from(conn.apiKey, 'base64').toString() : undefined,
+          };
+        }
+      } catch {
+        // ignore and fallback
+      }
+    }
+
+    return {
+      providerId: 'lm-studio',
+      modelId: 'google/gemma-3-4b',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+    };
+  }
+
+  /**
    * Initiates a streaming request to the Mastra engine and returns the raw
    * fetch Response so the controller can pipe response.body directly to Express.
    */
   async streamRequest(req: Request, agentId: string, userId: string, signal?: AbortSignal): Promise<Response> {
     const url = `${MASTRA_BASE_URL}/api/agents/${agentId}/stream`;
 
+    const userLlm = await this.getUserLlmContext(userId);
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
       'x-user-id': userId,
+      'x-provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
+      'x-model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
+      'x-llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl,
     };
 
     // Forward optional context headers
-    const forwardHeaders = ['x-user-tier', 'x-tenant-id', 'x-execution-mode', 'x-allow-commands'];
+    const forwardHeaders = ['x-user-tier', 'x-tenant-id', 'x-execution-mode', 'x-allow-commands', 'accept-language'];
     for (const h of forwardHeaders) {
       const val = req.headers[h];
       if (val) {
@@ -108,9 +154,15 @@ export class AiProxyService {
     const targetPath = overridePath ?? this.mapAiToMastraPath(req.url);
     const url = `${MASTRA_BASE_URL}${targetPath}`;
     const method = req.method;
+    const userId = (req.user as any)?.id;
+
+    const userLlm = await this.getUserLlmContext(userId);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'x-provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
+      'x-model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
+      'x-llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl,
     };
 
     const userHeaders = ['x-user-id', 'x-user-tier', 'x-tenant-id', 'x-allow-commands', 'accept-language'];

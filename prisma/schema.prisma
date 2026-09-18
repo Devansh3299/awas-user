@@ -8,12 +8,14 @@ generator client {
 }
 
 model User {
-  id           String   @id @default(auto()) @map("_id") @db.ObjectId
-  email        String   @unique
+  id           String        @id @default(auto()) @map("_id") @db.ObjectId
+  email        String        @unique
   passwordHash String
-  role         String   @default("user")
-  tokenBalance Int      @default(100)
-  createdAt    DateTime @default(now())
+  role         String        @default("user")
+  tokenBalance Int           @default(100)
+  createdAt    DateTime      @default(now())
+  modelConfigs   ModelConfig[]
+  llmConnections LlmConnection[]
 }
 
 model Agent {
@@ -24,3 +26,68 @@ model Agent {
   version     String   @default("1.0.0")
   createdAt   DateTime @default(now())
 }
+
+/// Per-user LLM provider configuration (API keys, endpoints, default model).
+/// Stored in MongoDB — one record per (userId, providerId) pair.
+model ModelConfig {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String    @db.ObjectId
+  user       User      @relation(fields: [userId], references: [id])
+  /// Provider identifier: 'groq' | 'gemini' | 'ollama' | 'openai' | 'lm-studio'
+  providerId String
+  /// API key — stored as base64-encoded string for basic obfuscation
+  apiKey     String?
+  /// Custom base URL (Ollama host, Azure OpenAI endpoint, LM Studio URL)
+  baseUrl    String?
+  /// Default model ID override for this provider
+  modelId    String?
+  /// Whether this provider is active
+  isEnabled  Boolean   @default(true)
+  /// Whether this provider is the platform-wide default for this user
+  isDefault  Boolean   @default(false)
+  /// Timestamp of the last successful/failed connection test
+  lastTested DateTime?
+  /// Test result: 'ok' | 'error' | 'pending' | null
+  testStatus String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([userId, providerId])
+}
+
+/// Dedicated LLM Connection model storing provider endpoints, loaded/available models,
+/// credentials, and connection health.
+/// Stored in MongoDB in the `llmConnection` collection.
+model LlmConnection {
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId          String    @db.ObjectId
+  user            User      @relation(fields: [userId], references: [id])
+  /// Provider identifier: 'lm-studio' | 'groq' | 'gemini' | 'ollama' | 'openai'
+  providerId      String
+  /// Friendly display name, e.g. "LM Studio (127.0.0.1:1234)"
+  name            String?
+  /// API key — stored as base64-encoded string
+  apiKey          String?
+  /// Custom base URL (e.g. 'http://127.0.0.1:1234/v1')
+  baseUrl         String?
+  /// Selected active/default model ID (e.g. 'google/gemma-3-4b')
+  modelId         String?
+  /// Synced/available models loaded from provider (JSON list of models)
+  availableModels Json?
+  /// Whether this connection is enabled
+  isEnabled       Boolean   @default(true)
+  /// Whether this connection is the platform default
+  isDefault       Boolean   @default(false)
+  /// Timestamp of the last successful/failed connection test
+  lastTested      DateTime?
+  /// Test result: 'ok' | 'error' | 'pending' | null
+  testStatus      String?
+  /// Measured round-trip latency in milliseconds
+  latencyMs       Int?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([userId, providerId])
+  @@map("llmConnection")
+}
+

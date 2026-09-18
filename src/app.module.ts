@@ -7,10 +7,23 @@ import { AuthModule } from './auth/auth.module';
 import { AgentsModule } from './agents/agents.module';
 import { AiProxyModule } from './ai-proxy/ai-proxy.module';
 import { TokensModule } from './tokens/tokens.module';
+import { LlmModelsModule } from './llm-models/llm-models.module';
+import { LlmConnectionModule } from './llm-connection/llm-connection.module';
 
 @Module({
-  imports: [PrismaModule, UsersModule, AuthModule, AgentsModule, AiProxyModule, TokensModule],
+  imports: [
+    PrismaModule,
+    UsersModule,
+    AuthModule,
+    AgentsModule,
+    AiProxyModule,
+    TokensModule,
+    LlmModelsModule,
+    LlmConnectionModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}
+
+
