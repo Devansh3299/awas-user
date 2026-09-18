@@ -35,10 +35,10 @@ export class AiProxyController {
 
   /**
    * POST /ai/agents/:id/generate
+   * POST /ai/agents/:id/stream
    *
-   * Dual-mode endpoint:
-   *  - If client sends `Accept: text/event-stream` → SSE streaming pipe from Mastra.
-   *  - Otherwise → blocking JSON proxy (backward-compat fallback).
+   * Real-time SSE streaming execution pipeline for agents.
+   * Pipes Server-Sent Events directly from Mastra (:4111) to the client.
    */
   @UseGuards(JwtAuthGuard)
   @Post('agents/:id/generate')
@@ -48,6 +48,21 @@ export class AiProxyController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    return this.handleStreamExecution(agentId, req, res);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('agents/:id/stream')
+  @HttpCode(HttpStatus.OK)
+  async stream(
+    @Param('id') agentId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.handleStreamExecution(agentId, req, res);
+  }
+
+  private async handleStreamExecution(agentId: string, req: Request, res: Response) {
     const userId = (req.user as any)?.id;
     if (!userId) {
       res.status(401).json({ error: 'User not authenticated' });
@@ -65,7 +80,7 @@ export class AiProxyController {
       abortController.abort();
     });
 
-    // Always stream — call Mastra's /stream endpoint and pipe SSE directly
+    // Call Mastra's /stream endpoint and pipe SSE directly
     const mastraResponse = await this.aiProxyService.streamRequest(req, agentId, userId, abortController.signal);
 
     // Set SSE headers before anything else
@@ -148,30 +163,6 @@ export class AiProxyController {
       res.end();
       try { await this.aiProxyService.deductTokens(userId); } catch {}
     }
-  }
-
-
-  @UseGuards(JwtAuthGuard)
-  @Post('agents/:id/stream')
-  @HttpCode(HttpStatus.OK)
-  async stream(
-    @Param('id') agentId: string,
-    @Req() req: Request,
-    @Res() res: Response,
-  ) {
-    const userId = (req.user as any)?.id;
-    if (!userId) {
-      res.status(401).json({ error: 'User not authenticated' });
-      return;
-    }
-    const hasBalance = await this.aiProxyService.hasSufficientBalance(userId, 1);
-    if (!hasBalance) {
-      res.status(402).json({ error: 'Insufficient token balance' });
-      return;
-    }
-    const mastraResponse = await this.aiProxyService.proxyRequest(req, `/api/agents/${agentId}/stream`);
-    await this.aiProxyService.deductTokens(userId);
-    res.status(mastraResponse.status).json(mastraResponse.data);
   }
 
   @UseGuards(JwtAuthGuard)
