@@ -9,6 +9,7 @@ import { AiProxyModule } from './ai-proxy/ai-proxy.module';
 import { TokensModule } from './tokens/tokens.module';
 import { LlmModelsModule } from './llm-models/llm-models.module';
 import { LlmConnectionModule } from './llm-connection/llm-connection.module';
+import { WorkflowsModule } from './workflows/workflows.module';
 
 @Module({
   imports: [
@@ -20,10 +21,9 @@ import { LlmConnectionModule } from './llm-connection/llm-connection.module';
     TokensModule,
     LlmModelsModule,
     LlmConnectionModule,
+    WorkflowsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}
-
-
