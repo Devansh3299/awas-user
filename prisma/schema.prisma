@@ -8,16 +8,26 @@ generator client {
 }
 
 model User {
-  id             String          @id @default(auto()) @map("_id") @db.ObjectId
-  email          String          @unique
-  passwordHash   String
-  role           String          @default("user")
-  tokenBalance   Int             @default(100)
-  workflows      Workflow[]
-  refreshToken   String?
-  createdAt      DateTime        @default(now())
-  modelConfigs   ModelConfig[]
-  llmConnections LlmConnection[]
+  id               String          @id @default(auto()) @map("_id") @db.ObjectId
+  email            String          @unique
+  passwordHash     String
+  role             String          @default("user")
+  name             String?
+  jobTitle         String?
+  bio              String?
+  avatarUrl        String?
+  twoFactorEnabled Boolean         @default(false)
+  tokenBalance     Int             @default(100)
+  organizationId   String?         @db.ObjectId
+  organization     Organization?   @relation(fields: [organizationId], references: [id])
+  settings         UserSettings?
+  apiTokens        ApiToken[]
+  workflows        Workflow[]
+  refreshToken     String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @default(now()) @updatedAt
+  modelConfigs     ModelConfig[]
+  llmConnections   LlmConnection[]
 }
 
 model Agent {
@@ -106,4 +116,56 @@ model Workflow {
   updatedAt   DateTime @updatedAt
 
   @@map("workflow")
+}
+
+model Organization {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  slug      String   @unique
+  website   String?
+  industry  String?
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("organization")
+}
+
+model UserSettings {
+  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId             String   @unique @db.ObjectId
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Notifications
+  automationFailures Boolean  @default(true)
+  weeklyDigest       Boolean  @default(true)
+  agentErrorAlerts   Boolean  @default(true)
+  billingReminders   Boolean  @default(false)
+  newFeatures        Boolean  @default(false)
+  teamActivity       Boolean  @default(true)
+  // Appearance
+  theme              String   @default("Light")
+  sidebarDefault     String   @default("Expanded")
+  // Region & Language
+  timezone           String   @default("UTC+05:30 – Mumbai, New Delhi")
+  language           String   @default("English (US)")
+  dateFormat         String   @default("MM/DD/YYYY")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@map("userSettings")
+}
+
+model ApiToken {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String    @db.ObjectId
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  tokenPrefix String
+  tokenHash   String
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("apiToken")
 }

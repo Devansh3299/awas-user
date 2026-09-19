@@ -10,6 +10,7 @@ import { TokensModule } from './tokens/tokens.module';
 import { LlmModelsModule } from './llm-models/llm-models.module';
 import { LlmConnectionModule } from './llm-connection/llm-connection.module';
 import { WorkflowsModule } from './workflows/workflows.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
     LlmModelsModule,
     LlmConnectionModule,
     WorkflowsModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
