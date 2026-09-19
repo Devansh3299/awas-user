@@ -76,9 +76,15 @@ export class AiProxyController {
     }
 
     const abortController = new AbortController();
-    req.on('close', () => {
+    let nodeStream: Readable | null = null;
+
+    const cleanup = () => {
       abortController.abort();
-    });
+      if (nodeStream && !nodeStream.destroyed) {
+        nodeStream.destroy();
+      }
+    };
+    req.once('close', cleanup);
 
     // Call Mastra's /stream endpoint and pipe SSE directly
     const mastraResponse = await this.aiProxyService.streamRequest(req, agentId, userId, abortController.signal);
@@ -107,7 +113,7 @@ export class AiProxyController {
 
     if (contentType.includes('text/event-stream')) {
       // ── True streaming: pipe the SSE body from Mastra directly ──────────
-      const nodeStream = Readable.fromWeb(mastraResponse.body as any);
+      nodeStream = Readable.fromWeb(mastraResponse.body as any);
 
       nodeStream.on('data', (chunk) => res.write(chunk));
 
@@ -118,12 +124,11 @@ export class AiProxyController {
 
       nodeStream.on('error', (err) => {
         console.error('[AiProxy] stream error:', err.message);
+        try {
+          res.write(`data: 3:${JSON.stringify(err.message || 'Stream error')}\n\n`);
+          res.write(`data: d:{"finishReason":"error"}\n\n`);
+        } catch {}
         res.end();
-      });
-
-      req.on('close', () => {
-        abortController.abort();
-        nodeStream.destroy();
       });
 
     } else {
@@ -163,6 +168,40 @@ export class AiProxyController {
       res.end();
       try { await this.aiProxyService.deductTokens(userId); } catch {}
     }
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('workflows')
+  async listWorkflows(@Res() res: Response) {
+    const workflows = await this.aiProxyService.listWorkflows();
+    res.status(200).json(workflows);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('workflows/:id/run')
+  async runWorkflow(
+    @Param('id') workflowId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const userId = (req.user as any)?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'User not authenticated' });
+      return;
+    }
+
+    const hasBalance = await this.aiProxyService.hasSufficientBalance(userId, 1);
+    if (!hasBalance) {
+      res.status(402).json({ error: 'Insufficient token balance' });
+      return;
+    }
+
+    const result = await this.aiProxyService.runWorkflow(workflowId, req.body, userId);
+    try {
+      await this.aiProxyService.deductTokens(userId);
+    } catch {}
+
+    res.status(200).json(result);
   }
 
   @UseGuards(JwtAuthGuard)

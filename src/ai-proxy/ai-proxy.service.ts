@@ -40,12 +40,21 @@ export function normalizeAgentExecutionBody(body: any) {
 
 @Injectable()
 export class AiProxyService {
+  private agentCache: { data: any; timestamp: number } | null = null;
+  private workflowCache: { data: any; timestamp: number } | null = null;
+  private readonly CACHE_TTL_MS = 10_000;
+
   constructor(
     private prisma: PrismaService,
     private tokensService: TokensService,
   ) {}
 
   async listAgents() {
+    const now = Date.now();
+    if (this.agentCache && now - this.agentCache.timestamp < this.CACHE_TTL_MS) {
+      return this.agentCache.data;
+    }
+
     try {
       const response = await fetch(`${MASTRA_BASE_URL}/api/agents`, {
         headers: {
@@ -54,13 +63,110 @@ export class AiProxyService {
       });
 
       if (!response.ok) {
-        return [];
+        return this.agentCache?.data || [];
       }
 
       const data = await response.json();
-      return Array.isArray(data) ? data : Object.values(data ?? {});
-    } catch (err) {
+      const list = Array.isArray(data) ? data : Object.values(data ?? {});
+      this.agentCache = { data: list, timestamp: now };
+      return list;
+    } catch (err: any) {
+      if (this.agentCache) return this.agentCache.data;
       throw new BadRequestException(`Failed to reach Mastra service: ${err.message}`);
+    }
+  }
+
+  async listWorkflows() {
+    const now = Date.now();
+    if (this.workflowCache && now - this.workflowCache.timestamp < this.CACHE_TTL_MS) {
+      return this.workflowCache.data;
+    }
+
+    try {
+      const response = await fetch(`${MASTRA_BASE_URL}/api/workflows`, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        return this.workflowCache?.data || [];
+      }
+
+      const data = await response.json();
+      this.workflowCache = { data, timestamp: now };
+      return data;
+    } catch (err: any) {
+      if (this.workflowCache) return this.workflowCache.data;
+      throw new BadRequestException(`Failed to reach Mastra workflows: ${err.message}`);
+    }
+  }
+
+  async runWorkflow(workflowId: string, input: any, userId: string) {
+    const userLlm = await this.getUserLlmContext(userId);
+
+    // 1. Create a run
+    let runId: string;
+    try {
+      const createRes = await fetch(`${MASTRA_BASE_URL}/api/workflows/${workflowId}/create-run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          resourceId: userId,
+        }),
+      });
+
+      if (!createRes.ok) {
+        const errJson = await createRes.json().catch(() => ({}));
+        throw new Error(errJson?.error || `HTTP ${createRes.status} creating run`);
+      }
+
+      const createData = await createRes.json();
+      runId = createData.runId;
+      if (!runId) {
+        throw new Error('Mastra did not return a runId for workflow execution');
+      }
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to initialize workflow run: ${err.message}`);
+    }
+
+    // 2. Start the workflow run
+    try {
+      const startRes = await fetch(`${MASTRA_BASE_URL}/api/workflows/${workflowId}/start?runId=${runId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': userId,
+          'x-provider-id': userLlm.providerId,
+          'x-model-id': userLlm.modelId,
+          'x-llm-base-url': userLlm.baseUrl,
+        },
+        body: JSON.stringify({
+          inputData: input?.inputData ?? input?.input ?? input ?? {},
+          requestContext: {
+            'user-id': userId,
+            'provider-id': userLlm.providerId,
+            'model-id': userLlm.modelId,
+            'llm-base-url': userLlm.baseUrl,
+          },
+        }),
+      });
+
+      const startData = await startRes.json().catch(() => ({}));
+      if (!startRes.ok) {
+        throw new Error(startData?.error || `HTTP ${startRes.status} starting workflow`);
+      }
+
+      return {
+        success: true,
+        workflowId,
+        runId,
+        result: startData,
+      };
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to execute workflow: ${err.message}`);
     }
   }
 
