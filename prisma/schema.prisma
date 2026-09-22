@@ -16,7 +16,7 @@ model User {
   jobTitle         String?
   bio              String?
   avatarUrl        String?
-  twoFactorEnabled Boolean         @default(false)
+  twoFactorEnabled Boolean?        @default(false)
   tokenBalance     Int             @default(100)
   organizationId   String?         @db.ObjectId
   organization     Organization?   @relation(fields: [organizationId], references: [id])
@@ -25,7 +25,7 @@ model User {
   workflows        Workflow[]
   refreshToken     String?
   createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @default(now()) @updatedAt
+  updatedAt        DateTime?       @updatedAt
   modelConfigs     ModelConfig[]
   llmConnections   LlmConnection[]
 }
@@ -124,6 +124,7 @@ model Organization {
   slug      String   @unique
   website   String?
   industry  String?
+  logoUrl   String?
   users     User[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -132,25 +133,39 @@ model Organization {
 }
 
 model UserSettings {
-  id                 String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId             String   @unique @db.ObjectId
-  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                   String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId               String   @unique @db.ObjectId
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Execution Defaults (Cloud vs Local dual execution)
+  defaultExecutionMode String   @default("cloud") // "cloud" | "local"
+  defaultModelId       String   @default("google/gemini-2.5-flash")
+  temperature          Float    @default(0.7)
+  maxTokens            Int      @default(2048)
   // Notifications
-  automationFailures Boolean  @default(true)
-  weeklyDigest       Boolean  @default(true)
-  agentErrorAlerts   Boolean  @default(true)
-  billingReminders   Boolean  @default(false)
-  newFeatures        Boolean  @default(false)
-  teamActivity       Boolean  @default(true)
-  // Appearance
-  theme              String   @default("Light")
-  sidebarDefault     String   @default("Expanded")
+  automationFailures   Boolean  @default(true)
+  weeklyDigest         Boolean  @default(true)
+  agentErrorAlerts     Boolean  @default(true)
+  billingReminders     Boolean  @default(false)
+  newFeatures          Boolean  @default(false)
+  teamActivity         Boolean  @default(true)
+  emailDigestFrequency String   @default("weekly")
+  webhookUrl           String?
+  // Appearance & Canvas
+  theme                String   @default("Light")
+  sidebarDefault       String   @default("Expanded")
+  canvasGridStyle      String   @default("dots") // "dots" | "lines" | "cross"
+  interfaceDensity     String   @default("comfortable") // "comfortable" | "compact"
+  soundEffects         Boolean  @default(true)
   // Region & Language
-  timezone           String   @default("UTC+05:30 – Mumbai, New Delhi")
-  language           String   @default("English (US)")
-  dateFormat         String   @default("MM/DD/YYYY")
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  timezone             String   @default("UTC+05:30 – Mumbai, New Delhi")
+  language             String   @default("English (US)")
+  dateFormat           String   @default("MM/DD/YYYY")
+  currency             String   @default("USD ($)")
+  // Telemetry & Privacy
+  telemetryEnabled     Boolean  @default(true)
+  crashReportsEnabled  Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@map("userSettings")
 }
@@ -162,6 +177,7 @@ model ApiToken {
   name        String
   tokenPrefix String
   tokenHash   String
+  scopes      String[]  @default(["all"])
   expiresAt   DateTime?
   lastUsedAt  DateTime?
   createdAt   DateTime  @default(now())
@@ -169,3 +185,4 @@ model ApiToken {
 
   @@map("apiToken")
 }
+

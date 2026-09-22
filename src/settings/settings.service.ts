@@ -13,6 +13,7 @@ import { UpdateRegionDto } from './dto/update-region.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateApiTokenDto } from './dto/create-api-token.dto';
 import { Toggle2FaDto } from './dto/toggle-2fa.dto';
+import { UpdateExecutionDto } from './dto/update-execution.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 
@@ -35,6 +36,7 @@ export class SettingsService {
             id: true,
             name: true,
             tokenPrefix: true,
+            scopes: true,
             expiresAt: true,
             lastUsedAt: true,
             createdAt: true,
@@ -53,17 +55,29 @@ export class SettingsService {
       settings = await this.prisma.userSettings.create({
         data: {
           userId,
+          defaultExecutionMode: 'cloud',
+          defaultModelId: 'google/gemini-2.5-flash',
+          temperature: 0.7,
+          maxTokens: 2048,
           automationFailures: true,
           weeklyDigest: true,
           agentErrorAlerts: true,
           billingReminders: false,
           newFeatures: false,
           teamActivity: true,
+          emailDigestFrequency: 'weekly',
+          webhookUrl: '',
           theme: 'Light',
           sidebarDefault: 'Expanded',
+          canvasGridStyle: 'dots',
+          interfaceDensity: 'comfortable',
+          soundEffects: true,
           timezone: 'UTC+05:30 – Mumbai, New Delhi',
           language: 'English (US)',
           dateFormat: 'MM/DD/YYYY',
+          currency: 'USD ($)',
+          telemetryEnabled: true,
+          crashReportsEnabled: true,
         },
       });
     }
@@ -77,6 +91,7 @@ export class SettingsService {
         bio: user.bio || 'Building agentic workflows at the edge.',
         avatarUrl: user.avatarUrl || '',
         role: user.role,
+        createdAt: user.createdAt,
       },
       organization: user.organization
         ? {
@@ -85,6 +100,7 @@ export class SettingsService {
             slug: user.organization.slug,
             website: user.organization.website || '',
             industry: user.organization.industry || 'Software & Technology',
+            logoUrl: user.organization.logoUrl || '',
           }
         : {
             id: '',
@@ -92,7 +108,14 @@ export class SettingsService {
             slug: 'acme-corp',
             website: 'https://acme.io',
             industry: 'Software & Technology',
+            logoUrl: '',
           },
+      execution: {
+        defaultExecutionMode: settings.defaultExecutionMode || 'cloud',
+        defaultModelId: settings.defaultModelId || 'google/gemini-2.5-flash',
+        temperature: settings.temperature ?? 0.7,
+        maxTokens: settings.maxTokens ?? 2048,
+      },
       notifications: {
         automationFailures: settings.automationFailures,
         weeklyDigest: settings.weeklyDigest,
@@ -100,15 +123,25 @@ export class SettingsService {
         billingReminders: settings.billingReminders,
         newFeatures: settings.newFeatures,
         teamActivity: settings.teamActivity,
+        emailDigestFrequency: settings.emailDigestFrequency || 'weekly',
+        webhookUrl: settings.webhookUrl || '',
       },
       appearance: {
         theme: settings.theme,
         sidebarDefault: settings.sidebarDefault,
+        canvasGridStyle: settings.canvasGridStyle || 'dots',
+        interfaceDensity: settings.interfaceDensity || 'comfortable',
+        soundEffects: settings.soundEffects ?? true,
       },
       region: {
         timezone: settings.timezone,
         language: settings.language,
         dateFormat: settings.dateFormat,
+        currency: settings.currency || 'USD ($)',
+      },
+      privacy: {
+        telemetryEnabled: settings.telemetryEnabled ?? true,
+        crashReportsEnabled: settings.crashReportsEnabled ?? true,
       },
       security: {
         twoFactorEnabled: !!user.twoFactorEnabled,
@@ -118,7 +151,7 @@ export class SettingsService {
   }
 
   /**
-   * Update personal profile info (name, jobTitle, bio, avatarUrl) in User collection.
+   * Update personal profile info in User collection.
    */
   async updateProfile(userId: string, dto: UpdateProfileDto) {
     const data: any = {};
@@ -144,7 +177,7 @@ export class SettingsService {
   }
 
   /**
-   * Update or create organization settings and associate with user in MongoDB.
+   * Update or create organization settings in MongoDB Atlas.
    */
   async updateOrganization(userId: string, dto: UpdateOrganizationDto) {
     const user = await this.prisma.user.findUnique({
@@ -174,7 +207,6 @@ export class SettingsService {
         },
       });
     } else {
-      // Check if slug exists, if so generate a unique suffix
       let finalSlug = slug;
       const existing = await this.prisma.organization.findUnique({
         where: { slug: finalSlug },
@@ -205,6 +237,36 @@ export class SettingsService {
       slug: organization.slug,
       website: organization.website || '',
       industry: organization.industry || '',
+      logoUrl: organization.logoUrl || '',
+    };
+  }
+
+  /**
+   * Update execution defaults (Cloud vs Local mode, model, temperature, maxTokens).
+   */
+  async updateExecution(userId: string, dto: UpdateExecutionDto) {
+    const data: any = {};
+    if (dto.defaultExecutionMode !== undefined)
+      data.defaultExecutionMode = dto.defaultExecutionMode;
+    if (dto.defaultModelId !== undefined)
+      data.defaultModelId = dto.defaultModelId;
+    if (dto.temperature !== undefined) data.temperature = dto.temperature;
+    if (dto.maxTokens !== undefined) data.maxTokens = dto.maxTokens;
+
+    const settings = await this.prisma.userSettings.upsert({
+      where: { userId },
+      update: data,
+      create: {
+        userId,
+        ...data,
+      },
+    });
+
+    return {
+      defaultExecutionMode: settings.defaultExecutionMode,
+      defaultModelId: settings.defaultModelId,
+      temperature: settings.temperature,
+      maxTokens: settings.maxTokens,
     };
   }
 
@@ -212,36 +274,27 @@ export class SettingsService {
    * Update notification preferences in userSettings collection.
    */
   async updateNotifications(userId: string, dto: UpdateNotificationsDto) {
+    const data: any = {};
+    if (dto.automationFailures !== undefined)
+      data.automationFailures = dto.automationFailures;
+    if (dto.weeklyDigest !== undefined)
+      data.weeklyDigest = dto.weeklyDigest;
+    if (dto.agentErrorAlerts !== undefined)
+      data.agentErrorAlerts = dto.agentErrorAlerts;
+    if (dto.billingReminders !== undefined)
+      data.billingReminders = dto.billingReminders;
+    if (dto.newFeatures !== undefined) data.newFeatures = dto.newFeatures;
+    if (dto.teamActivity !== undefined) data.teamActivity = dto.teamActivity;
+    if (dto.emailDigestFrequency !== undefined)
+      data.emailDigestFrequency = dto.emailDigestFrequency;
+    if (dto.webhookUrl !== undefined) data.webhookUrl = dto.webhookUrl;
+
     const settings = await this.prisma.userSettings.upsert({
       where: { userId },
-      update: {
-        ...(dto.automationFailures !== undefined && {
-          automationFailures: dto.automationFailures,
-        }),
-        ...(dto.weeklyDigest !== undefined && {
-          weeklyDigest: dto.weeklyDigest,
-        }),
-        ...(dto.agentErrorAlerts !== undefined && {
-          agentErrorAlerts: dto.agentErrorAlerts,
-        }),
-        ...(dto.billingReminders !== undefined && {
-          billingReminders: dto.billingReminders,
-        }),
-        ...(dto.newFeatures !== undefined && {
-          newFeatures: dto.newFeatures,
-        }),
-        ...(dto.teamActivity !== undefined && {
-          teamActivity: dto.teamActivity,
-        }),
-      },
+      update: data,
       create: {
         userId,
-        automationFailures: dto.automationFailures ?? true,
-        weeklyDigest: dto.weeklyDigest ?? true,
-        agentErrorAlerts: dto.agentErrorAlerts ?? true,
-        billingReminders: dto.billingReminders ?? false,
-        newFeatures: dto.newFeatures ?? false,
-        teamActivity: dto.teamActivity ?? true,
+        ...data,
       },
     });
 
@@ -252,50 +305,64 @@ export class SettingsService {
       billingReminders: settings.billingReminders,
       newFeatures: settings.newFeatures,
       teamActivity: settings.teamActivity,
+      emailDigestFrequency: settings.emailDigestFrequency,
+      webhookUrl: settings.webhookUrl,
     };
   }
 
   /**
-   * Update appearance preferences (theme, sidebarDefault) in userSettings collection.
+   * Update appearance preferences in userSettings collection.
    */
   async updateAppearance(userId: string, dto: UpdateAppearanceDto) {
+    const data: any = {};
+    if (dto.theme !== undefined) data.theme = dto.theme;
+    if (dto.sidebarDefault !== undefined)
+      data.sidebarDefault = dto.sidebarDefault;
+    if (dto.canvasGridStyle !== undefined)
+      data.canvasGridStyle = dto.canvasGridStyle;
+    if (dto.interfaceDensity !== undefined)
+      data.interfaceDensity = dto.interfaceDensity;
+    if (dto.soundEffects !== undefined)
+      data.soundEffects = dto.soundEffects;
+
     const settings = await this.prisma.userSettings.upsert({
       where: { userId },
-      update: {
-        ...(dto.theme !== undefined && { theme: dto.theme }),
-        ...(dto.sidebarDefault !== undefined && {
-          sidebarDefault: dto.sidebarDefault,
-        }),
-      },
+      update: data,
       create: {
         userId,
-        theme: dto.theme ?? 'Light',
-        sidebarDefault: dto.sidebarDefault ?? 'Expanded',
+        ...data,
       },
     });
 
     return {
       theme: settings.theme,
       sidebarDefault: settings.sidebarDefault,
+      canvasGridStyle: settings.canvasGridStyle,
+      interfaceDensity: settings.interfaceDensity,
+      soundEffects: settings.soundEffects,
     };
   }
 
   /**
-   * Update regional settings (timezone, language, dateFormat) in userSettings collection.
+   * Update regional and localization settings in userSettings collection.
    */
   async updateRegion(userId: string, dto: UpdateRegionDto) {
+    const data: any = {};
+    if (dto.timezone !== undefined) data.timezone = dto.timezone;
+    if (dto.language !== undefined) data.language = dto.language;
+    if (dto.dateFormat !== undefined) data.dateFormat = dto.dateFormat;
+    if (dto.currency !== undefined) data.currency = dto.currency;
+    if (dto.telemetryEnabled !== undefined)
+      data.telemetryEnabled = dto.telemetryEnabled;
+    if (dto.crashReportsEnabled !== undefined)
+      data.crashReportsEnabled = dto.crashReportsEnabled;
+
     const settings = await this.prisma.userSettings.upsert({
       where: { userId },
-      update: {
-        ...(dto.timezone !== undefined && { timezone: dto.timezone }),
-        ...(dto.language !== undefined && { language: dto.language }),
-        ...(dto.dateFormat !== undefined && { dateFormat: dto.dateFormat }),
-      },
+      update: data,
       create: {
         userId,
-        timezone: dto.timezone ?? 'UTC+05:30 – Mumbai, New Delhi',
-        language: dto.language ?? 'English (US)',
-        dateFormat: dto.dateFormat ?? 'MM/DD/YYYY',
+        ...data,
       },
     });
 
@@ -303,6 +370,9 @@ export class SettingsService {
       timezone: settings.timezone,
       language: settings.language,
       dateFormat: settings.dateFormat,
+      currency: settings.currency,
+      telemetryEnabled: settings.telemetryEnabled,
+      crashReportsEnabled: settings.crashReportsEnabled,
     };
   }
 
@@ -357,7 +427,7 @@ export class SettingsService {
   }
 
   /**
-   * List personal access tokens for authenticated user (excluding hashes).
+   * List personal access tokens for authenticated user.
    */
   async listApiTokens(userId: string) {
     return this.prisma.apiToken.findMany({
@@ -366,6 +436,7 @@ export class SettingsService {
         id: true,
         name: true,
         tokenPrefix: true,
+        scopes: true,
         expiresAt: true,
         lastUsedAt: true,
         createdAt: true,
@@ -376,7 +447,6 @@ export class SettingsService {
 
   /**
    * Generate a new personal access token and store hash in apiToken collection.
-   * Returns plaintext token once to caller.
    */
   async createApiToken(userId: string, dto: CreateApiTokenDto) {
     const randomHex = crypto.randomBytes(24).toString('hex');
@@ -397,6 +467,7 @@ export class SettingsService {
         name: dto.name,
         tokenPrefix,
         tokenHash,
+        scopes: dto.scopes && dto.scopes.length > 0 ? dto.scopes : ['all'],
         expiresAt,
       },
     });
@@ -406,6 +477,7 @@ export class SettingsService {
       name: record.name,
       token: rawToken,
       tokenPrefix: record.tokenPrefix,
+      scopes: record.scopes,
       expiresAt: record.expiresAt,
       createdAt: record.createdAt,
     };
@@ -430,5 +502,36 @@ export class SettingsService {
     });
 
     return { ok: true, id: tokenId };
+  }
+
+  /**
+   * Export all workspace data (settings, workflows, custom agents) as a portable bundle.
+   */
+  async exportWorkspaceData(userId: string) {
+    const [settings, workflows, user] = await Promise.all([
+      this.getSettings(userId),
+      this.prisma.workflow.findMany({ where: { userId } }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, email: true, role: true, tokenBalance: true },
+      }),
+    ]);
+
+    return {
+      version: '1.0.0',
+      exportedAt: new Date().toISOString(),
+      user,
+      settings,
+      workflowsCount: workflows.length,
+      workflows,
+    };
+  }
+
+  /**
+   * Reset user settings to platform factory defaults.
+   */
+  async resetSettings(userId: string) {
+    await this.prisma.userSettings.deleteMany({ where: { userId } });
+    return this.getSettings(userId);
   }
 }

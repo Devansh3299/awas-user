@@ -10,4 +10,17 @@ export class UpdateAppearanceDto {
   @IsOptional()
   @IsIn(['Expanded', 'Collapsed'])
   sidebarDefault?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['dots', 'lines', 'cross'])
+  canvasGridStyle?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['comfortable', 'compact'])
+  interfaceDensity?: string;
+
+  @IsOptional()
+  soundEffects?: boolean;
 }

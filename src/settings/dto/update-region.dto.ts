@@ -12,4 +12,14 @@ export class UpdateRegionDto {
   @IsString()
   @IsOptional()
   dateFormat?: string;
+
+  @IsString()
+  @IsOptional()
+  currency?: string;
+
+  @IsOptional()
+  telemetryEnabled?: boolean;
+
+  @IsOptional()
+  crashReportsEnabled?: boolean;
 }

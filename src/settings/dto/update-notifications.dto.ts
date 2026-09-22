@@ -24,4 +24,10 @@ export class UpdateNotificationsDto {
   @IsBoolean()
   @IsOptional()
   teamActivity?: boolean;
+
+  @IsOptional()
+  emailDigestFrequency?: string;
+
+  @IsOptional()
+  webhookUrl?: string;
 }

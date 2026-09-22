@@ -8,4 +8,7 @@ export class CreateApiTokenDto {
   @IsNumber()
   @IsOptional()
   expiresInDays?: number;
+
+  @IsOptional()
+  scopes?: string[];
 }

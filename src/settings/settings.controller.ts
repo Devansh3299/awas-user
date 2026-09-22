@@ -19,6 +19,7 @@ import { UpdateRegionDto } from './dto/update-region.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateApiTokenDto } from './dto/create-api-token.dto';
 import { Toggle2FaDto } from './dto/toggle-2fa.dto';
+import { UpdateExecutionDto } from './dto/update-execution.dto';
 
 @Controller('settings')
 @UseGuards(JwtAuthGuard)
@@ -27,7 +28,7 @@ export class SettingsController {
 
   /**
    * GET /settings
-   * Retrieve all settings (profile, org, notifications, appearance, region, security)
+   * Retrieve all settings (profile, org, execution, notifications, appearance, region, security)
    */
   @Get()
   getSettings(@Request() req: any) {
@@ -53,8 +54,17 @@ export class SettingsController {
   }
 
   /**
+   * PATCH /settings/execution
+   * Update dual-mode execution preferences (Cloud vs Local, default model, temp, tokens)
+   */
+  @Patch('execution')
+  updateExecution(@Body() dto: UpdateExecutionDto, @Request() req: any) {
+    return this.settingsService.updateExecution(req.user.id, dto);
+  }
+
+  /**
    * PATCH /settings/notifications
-   * Update notification preferences
+   * Update notification preferences & webhook configuration
    */
   @Patch('notifications')
   updateNotifications(
@@ -66,7 +76,7 @@ export class SettingsController {
 
   /**
    * PATCH /settings/appearance
-   * Update appearance theme & sidebar layout preferences
+   * Update appearance theme, sidebar layout, and canvas grid style
    */
   @Patch('appearance')
   updateAppearance(@Body() dto: UpdateAppearanceDto, @Request() req: any) {
@@ -75,7 +85,7 @@ export class SettingsController {
 
   /**
    * PATCH /settings/region
-   * Update timezone, language, and date format preferences
+   * Update timezone, language, date format, and currency
    */
   @Patch('region')
   updateRegion(@Body() dto: UpdateRegionDto, @Request() req: any) {
@@ -111,7 +121,7 @@ export class SettingsController {
 
   /**
    * POST /settings/security/tokens
-   * Generate a new personal access token
+   * Generate a new personal access token with scopes
    */
   @Post('security/tokens')
   createApiToken(@Body() dto: CreateApiTokenDto, @Request() req: any) {
@@ -125,5 +135,23 @@ export class SettingsController {
   @Delete('security/tokens/:id')
   revokeApiToken(@Param('id') id: string, @Request() req: any) {
     return this.settingsService.revokeApiToken(req.user.id, id);
+  }
+
+  /**
+   * POST /settings/export
+   * Export all workspace data (settings, workflows, custom agents)
+   */
+  @Post('export')
+  exportWorkspaceData(@Request() req: any) {
+    return this.settingsService.exportWorkspaceData(req.user.id);
+  }
+
+  /**
+   * POST /settings/reset
+   * Reset user settings to platform factory defaults
+   */
+  @Post('reset')
+  resetSettings(@Request() req: any) {
+    return this.settingsService.resetSettings(req.user.id);
   }
 }
