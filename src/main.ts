@@ -8,15 +8,10 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.use(cookieParser());
   app.enableCors({
-    origin: [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'https://awas-client-app.vercel.app',
-      process.env.FRONTEND_URL,
-    ].filter(Boolean) as string[],
+    origin: true,
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'x-user-id', 'x-user-tier', 'x-execution-mode'],
+    allowedHeaders: '*',
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
   });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.listen(process.env.PORT ?? 3000);

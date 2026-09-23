@@ -8,15 +8,27 @@ export class WorkflowsService {
   constructor(private prisma: PrismaService) {}
 
   async create(dto: CreateWorkflowDto, userId: string) {
+    const existing = await this.prisma.workflow.findUnique({
+      where: { workflowId: dto.workflowId },
+    });
+
+    const updateData: any = {
+      name: dto.name,
+      nodes: dto.nodes ?? [],
+      edges: dto.edges ?? [],
+      userId,
+    };
+
+    // Only set/update description if provided in DTO, preserving existing description if omitted
+    if (dto.description !== undefined) {
+      updateData.description = dto.description;
+    } else if (existing?.description !== undefined) {
+      updateData.description = existing.description;
+    }
+
     return this.prisma.workflow.upsert({
       where: { workflowId: dto.workflowId },
-      update: {
-        name: dto.name,
-        description: dto.description ?? '',
-        nodes: dto.nodes ?? [],
-        edges: dto.edges ?? [],
-        userId,
-      },
+      update: updateData,
       create: {
         workflowId: dto.workflowId,
         name: dto.name,
