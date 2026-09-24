@@ -28,6 +28,7 @@ model User {
   updatedAt        DateTime?       @default(now()) @updatedAt
   modelConfigs     ModelConfig[]
   llmConnections   LlmConnection[]
+  toolConnections  ToolConnection[]
 }
 
 model Agent {
@@ -184,5 +185,25 @@ model ApiToken {
   updatedAt   DateTime  @updatedAt
 
   @@map("apiToken")
+}
+
+model ToolConnection {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String    @db.ObjectId
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  toolId     String    // 'github', 'slack', 'google-sheets', 'exa', etc.
+  name       String?
+  type       String?   @default("Agent App") // "Agent App" | "MCP" | "LLM Provider"
+  token      String?   // base64 encoded
+  apiKey     String?   // base64 encoded
+  config     Json?     // custom parameters like repoOwner, repoName, orgId
+  status     String    @default("Configured")
+  lastTested DateTime?
+  latencyMs  Int?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([userId, toolId])
+  @@map("toolConnection")
 }
 

@@ -11,6 +11,7 @@ import { LlmModelsModule } from './llm-models/llm-models.module';
 import { LlmConnectionModule } from './llm-connection/llm-connection.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { SettingsModule } from './settings/settings.module';
+import { ToolsModule } from './tools/tools.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SettingsModule } from './settings/settings.module';
     LlmConnectionModule,
     WorkflowsModule,
     SettingsModule,
+    ToolsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
