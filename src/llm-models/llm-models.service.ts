@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SaveModelConfigDto } from './dto/save-model-config.dto';
 import { LlmConnectionService } from '../llm-connection/llm-connection.service';
 
-const MASTRA_BASE_URL = process.env.MASTRA_BASE_URL || 'http://localhost:4111';
+const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static provider catalogue — the source-of-truth list for the UI

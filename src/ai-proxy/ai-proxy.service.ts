@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TokensService } from '../tokens/tokens.service';
 import { Request } from 'express';
 
-const MASTRA_BASE_URL = process.env.MASTRA_BASE_URL || 'http://localhost:4111';
+const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
 
 interface MastraResponse {
   status: number;
