@@ -124,11 +124,13 @@ export class LlmConnectionService {
 
     // Auto-discover local LM Studio if not already configured or if models are empty
     let lmStudioLiveModels: any[] = [];
+    let isLmStudioRunning = false;
     try {
       const lmsResult = await this.fetchLiveModels('lm-studio', DEFAULT_LM_STUDIO_URL);
-      if (lmsResult.success && Array.isArray(lmsResult.models)) {
-        lmStudioLiveModels = lmsResult.models;
+      if (lmsResult && Array.isArray((lmsResult as any).models)) {
+        lmStudioLiveModels = (lmsResult as any).models;
       }
+      isLmStudioRunning = Boolean((lmsResult as any)?.isServerRunning);
     } catch {
       // LM Studio not currently running, proceed with catalog
     }
@@ -180,13 +182,13 @@ export class LlmConnectionService {
               hasApiKey: !!connection.apiKey,
               apiKeyMasked: connection.apiKey ? this.maskKey(connection.apiKey) : null,
               lastTested: connection.lastTested,
-              testStatus: connection.testStatus,
+              testStatus: isLmStudio && !isLmStudioRunning ? 'error' : connection.testStatus,
               latencyMs: connection.latencyMs,
               availableModelsCount: Array.isArray(connection.availableModels)
                 ? connection.availableModels.length
                 : models.length,
             }
-          : isLmStudio && lmStudioLiveModels.length > 0
+          : isLmStudio && isLmStudioRunning && lmStudioLiveModels.length > 0
           ? {
               id: null,
               name: 'LM Studio (Auto-Discovered)',
@@ -396,12 +398,14 @@ export class LlmConnectionService {
 
     // 2. Query HTTP API /v1/models as well
     let httpModels: any[] = [];
+    let isServerReachable = false;
     try {
       const url = targetUrl.endsWith('/v1') ? `${targetUrl}/models` : `${targetUrl}/v1/models`;
-      const resp = await fetch(url, { signal: AbortSignal.timeout(4000) });
+      const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
       if (resp.ok) {
         const data = await resp.json();
         httpModels = data?.data || [];
+        isServerReachable = true;
       }
     } catch (e: any) {
       this.logger.debug(`LM Studio HTTP /v1/models query note: ${e.message}`);
@@ -496,6 +500,7 @@ export class LlmConnectionService {
       count: formattedModels.length,
       models: formattedModels,
       linkedDevices,
+      isServerRunning: isServerReachable,
     };
   }
 
@@ -551,6 +556,34 @@ export class LlmConnectionService {
         success: true,
         count: (data?.data || []).length,
         models: data?.data || [],
+      };
+    }
+
+    if (providerId === 'gemini') {
+      const key = apiKey || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
+      if (!key) throw new Error('Google Gemini API key required to fetch models');
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`, {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) throw new Error(`Google Gemini returned status ${resp.status}`);
+      const data = await resp.json();
+      const models = (data?.models || [])
+        .filter((m: any) => m.supportedGenerationMethods?.includes('generateContent'))
+        .map((m: any) => {
+          const rawId = m.name.replace(/^models\//, '');
+          return {
+            id: `google/${rawId}`,
+            modelId: `google/${rawId}`,
+            name: m.displayName || rawId,
+            label: m.displayName || rawId,
+            contextWindow: m.inputTokenLimit || 1000000,
+            recommended: rawId.includes('2.0-flash') || rawId.includes('1.5-pro'),
+          };
+        });
+      return {
+        success: true,
+        count: models.length,
+        models: models.length > 0 ? models : (PROVIDER_CATALOG.find((c) => c.providerId === 'gemini')?.models || []),
       };
     }
 
