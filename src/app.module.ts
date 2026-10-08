@@ -12,6 +12,7 @@ import { LlmConnectionModule } from './llm-connection/llm-connection.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { SettingsModule } from './settings/settings.module';
 import { ToolsModule } from './tools/tools.module';
+import { AutomationsModule } from './automations/automations.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { ToolsModule } from './tools/tools.module';
     WorkflowsModule,
     SettingsModule,
     ToolsModule,
+    AutomationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -9,5 +9,6 @@ import { TokensModule } from '../tokens/tokens.module';
   imports: [PrismaModule, AuthModule, TokensModule],
   controllers: [AiProxyController],
   providers: [AiProxyService],
+  exports: [AiProxyService],
 })
 export class AiProxyModule {}
