@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
@@ -51,15 +51,56 @@ export class WorkflowsService {
     const workflow = await this.prisma.workflow.findUnique({
       where: { workflowId },
     });
-    if (!workflow) throw new NotFoundException(`Workflow ${workflowId} not found`);
-    if (workflow.userId !== userId) throw new UnauthorizedException('You do not have permission to view this workflow');
+
+    if (!workflow) {
+      // Check if this workflow exists in the public marketplace collection
+      const mpItem = await (this.prisma as any).marketplaceItem.findFirst({
+        where: {
+          OR: [{ itemId: workflowId }, { id: workflowId }],
+          type: 'workflow',
+          isPublished: true,
+        },
+      });
+
+      if (mpItem) {
+        return {
+          id: mpItem.id,
+          workflowId: mpItem.itemId,
+          name: mpItem.name,
+          description: mpItem.description ?? '',
+          nodes: mpItem.data?.nodes ?? [],
+          edges: mpItem.data?.edges ?? [],
+          userId: mpItem.userId,
+          isMarketplace: true,
+        };
+      }
+
+      throw new NotFoundException(`Workflow ${workflowId} not found`);
+    }
+
+    if (workflow.userId !== userId) {
+      // Check if this workflow is published in the marketplace
+      const mpItem = await (this.prisma as any).marketplaceItem.findFirst({
+        where: { itemId: workflowId, type: 'workflow', isPublished: true },
+      });
+
+      if (mpItem) {
+        return {
+          ...workflow,
+          isMarketplace: true,
+        };
+      }
+
+      throw new ForbiddenException('You do not have permission to view this workflow');
+    }
+
     return workflow;
   }
 
   async update(workflowId: string, dto: UpdateWorkflowDto, userId: string) {
     const workflow = await this.prisma.workflow.findUnique({ where: { workflowId } });
     if (!workflow) throw new NotFoundException(`Workflow ${workflowId} not found`);
-    if (workflow.userId !== userId) throw new UnauthorizedException('You do not have permission to modify this workflow');
+    if (workflow.userId !== userId) throw new ForbiddenException('You do not have permission to modify this workflow');
 
     const data: any = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -76,7 +117,7 @@ export class WorkflowsService {
   async remove(workflowId: string, userId: string) {
     const workflow = await this.prisma.workflow.findUnique({ where: { workflowId } });
     if (!workflow) throw new NotFoundException(`Workflow ${workflowId} not found`);
-    if (workflow.userId !== userId) throw new UnauthorizedException('You do not have permission to delete this workflow');
+    if (workflow.userId !== userId) throw new ForbiddenException('You do not have permission to delete this workflow');
 
     return await this.prisma.workflow.delete({ where: { workflowId } });
   }
