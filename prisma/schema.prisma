@@ -234,6 +234,8 @@ model MarketplaceItem {
   updatedAt   DateTime  @updatedAt
 
   @@map("marketplaceItem")
+}
+
 model Automation {
   id            String          @id @default(auto()) @map("_id") @db.ObjectId
   name          String
