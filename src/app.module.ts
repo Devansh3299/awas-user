@@ -13,6 +13,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
 import { SettingsModule } from './settings/settings.module';
 import { ToolsModule } from './tools/tools.module';
 import { AutomationsModule } from './automations/automations.module';
+import { MarketplaceModule } from './marketplace/marketplace.module';
 
 @Module({
   imports: [
@@ -28,8 +29,9 @@ import { AutomationsModule } from './automations/automations.module';
     SettingsModule,
     ToolsModule,
     AutomationsModule,
+    MarketplaceModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }

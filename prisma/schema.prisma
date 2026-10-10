@@ -23,6 +23,7 @@ model User {
   settings         UserSettings?
   apiTokens        ApiToken[]
   workflows        Workflow[]
+  marketplaceItems MarketplaceItem[]
   refreshToken     String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime?       @default(now()) @updatedAt
@@ -257,5 +258,26 @@ model AutomationRun {
   completedAt   DateTime?
 
   @@map("automationRun")
+model MarketplaceItem {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  itemId      String    @unique
+  type        String    @default("agent") // "agent" | "workflow"
+  name        String
+  description String?   @default("")
+  category    String?   @default("General")
+  price       String?   @default("Free")
+  rating      String?   @default("5.0")
+  userId      String?   @db.ObjectId
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  username    String?   @default("creator")
+  displayName String?   @default("Creator")
+  userEmail   String?   @default("")
+  data        Json      @default("{}") // Entire agent or workflow data & all fields
+  tags        String[]  @default([])
+  isPublished Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("marketplaceItem")
 }
 
