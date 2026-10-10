@@ -10,7 +10,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 const REFRESH_COOKIE = 'refresh_token';
 const COOKIE_OPTS = {
   httpOnly: true,
-  sameSite: 'lax' as const,
+  sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
   secure: process.env.NODE_ENV === 'production',
   maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
   path: '/',

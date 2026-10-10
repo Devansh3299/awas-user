@@ -21,38 +21,6 @@ import type { Request } from 'express';
 export class ToolsController {
   constructor(private readonly toolsService: ToolsService) {}
 
-  // ── Tools Catalogue Endpoints ─────────────────────────────────────────────
-
-  @UseGuards(JwtAuthGuard)
-  @Get(['ai/tools', 'tools'])
-  async listTools(
-    @Query('category') category?: string,
-    @Query('q') query?: string,
-  ) {
-    return this.toolsService.listTools(category, query);
-  }
-
-  @UseGuards(JwtAuthGuard)
-  @Get(['ai/tools/:id', 'tools/:id'])
-  async getToolById(@Param('id') toolId: string) {
-    return this.toolsService.getToolById(toolId);
-  }
-
-  // ── Sandbox Tool Execution ────────────────────────────────────────────────
-
-  @UseGuards(JwtAuthGuard)
-  @Post(['ai/tools/:id/execute', 'tools/:id/execute'])
-  @HttpCode(HttpStatus.OK)
-  async executeTool(
-    @Param('id') toolId: string,
-    @Body() body: ToolExecuteDto,
-    @Req() req: Request,
-  ) {
-    const userId = (req.user as any)?.id || 'anonymous';
-    const inputData = body.inputData ?? body.input ?? body;
-    return this.toolsService.executeTool(toolId, inputData, userId);
-  }
-
   // ── Tool Application Connections & Credentials ────────────────────────────
 
   @UseGuards(JwtAuthGuard)
@@ -93,5 +61,37 @@ export class ToolsController {
   ) {
     const userId = (req.user as any)?.id;
     return this.toolsService.testConnection(userId, toolId, dto);
+  }
+
+  // ── Tools Catalogue Endpoints ─────────────────────────────────────────────
+
+  @UseGuards(JwtAuthGuard)
+  @Get(['ai/tools', 'tools'])
+  async listTools(
+    @Query('category') category?: string,
+    @Query('q') query?: string,
+  ) {
+    return this.toolsService.listTools(category, query);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get(['ai/tools/:id', 'tools/:id'])
+  async getToolById(@Param('id') toolId: string) {
+    return this.toolsService.getToolById(toolId);
+  }
+
+  // ── Sandbox Tool Execution ────────────────────────────────────────────────
+
+  @UseGuards(JwtAuthGuard)
+  @Post(['ai/tools/:id/execute', 'tools/:id/execute'])
+  @HttpCode(HttpStatus.OK)
+  async executeTool(
+    @Param('id') toolId: string,
+    @Body() body: ToolExecuteDto,
+    @Req() req: Request,
+  ) {
+    const userId = (req.user as any)?.id || 'anonymous';
+    const inputData = body.inputData ?? body.input ?? body;
+    return this.toolsService.executeTool(toolId, inputData, userId);
   }
 }

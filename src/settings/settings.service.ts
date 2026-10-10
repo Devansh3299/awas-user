@@ -137,7 +137,10 @@ export class SettingsService {
         timezone: settings.timezone,
         language: settings.language,
         dateFormat: settings.dateFormat,
+        timeFormat: settings.timeFormat || '12-hour (AM/PM)',
         currency: settings.currency || 'USD ($)',
+        numberFormat: settings.numberFormat || '1,234.56',
+        firstDayOfWeek: settings.firstDayOfWeek || 'Monday',
       },
       privacy: {
         telemetryEnabled: settings.telemetryEnabled ?? true,
@@ -351,7 +354,10 @@ export class SettingsService {
     if (dto.timezone !== undefined) data.timezone = dto.timezone;
     if (dto.language !== undefined) data.language = dto.language;
     if (dto.dateFormat !== undefined) data.dateFormat = dto.dateFormat;
+    if (dto.timeFormat !== undefined) data.timeFormat = dto.timeFormat;
     if (dto.currency !== undefined) data.currency = dto.currency;
+    if (dto.numberFormat !== undefined) data.numberFormat = dto.numberFormat;
+    if (dto.firstDayOfWeek !== undefined) data.firstDayOfWeek = dto.firstDayOfWeek;
     if (dto.telemetryEnabled !== undefined)
       data.telemetryEnabled = dto.telemetryEnabled;
     if (dto.crashReportsEnabled !== undefined)
@@ -370,7 +376,10 @@ export class SettingsService {
       timezone: settings.timezone,
       language: settings.language,
       dateFormat: settings.dateFormat,
-      currency: settings.currency,
+      timeFormat: settings.timeFormat || '12-hour (AM/PM)',
+      currency: settings.currency || 'USD ($)',
+      numberFormat: settings.numberFormat || '1,234.56',
+      firstDayOfWeek: settings.firstDayOfWeek || 'Monday',
       telemetryEnabled: settings.telemetryEnabled,
       crashReportsEnabled: settings.crashReportsEnabled,
     };

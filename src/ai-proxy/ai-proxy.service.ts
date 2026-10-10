@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TokensService } from '../tokens/tokens.service';
 import { Request } from 'express';
 
-const MASTRA_BASE_URL = process.env.MASTRA_BASE_URL || 'http://localhost:4111';
+const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
 
 interface MastraResponse {
   status: number;
@@ -142,6 +142,7 @@ export class AiProxyService {
           'x-provider-id': userLlm.providerId,
           'x-model-id': userLlm.modelId,
           'x-llm-base-url': userLlm.baseUrl,
+          'x-execution-mode': userLlm.executionMode,
         },
         body: JSON.stringify({
           inputData: input?.inputData ?? input?.input ?? input ?? {},
@@ -150,6 +151,7 @@ export class AiProxyService {
             'provider-id': userLlm.providerId,
             'model-id': userLlm.modelId,
             'llm-base-url': userLlm.baseUrl,
+            'execution-mode': userLlm.executionMode,
           },
         }),
       });
@@ -179,25 +181,59 @@ export class AiProxyService {
   }
 
   /**
-   * Resolves the active LLM connection for the user, defaulting to local LM Studio with google/gemma-3-4b.
+   * Resolves the active LLM connection for the user based on execution mode preference (cloud vs local).
    */
-  private async getUserLlmContext(userId?: string) {
+  private async getUserLlmContext(userId?: string, executionMode?: string) {
     if (userId) {
       try {
-        const conn =
+        let mode = executionMode;
+        if (!mode) {
+          const userSettings = await this.prisma.userSettings.findUnique({
+            where: { userId },
+          });
+          mode = userSettings?.defaultExecutionMode || 'cloud';
+        }
+
+        if (mode === 'local') {
+          const localConn =
+            (await this.prisma.llmConnection.findFirst({
+              where: { userId, providerId: 'lm-studio', isEnabled: true },
+            })) ||
+            (await this.prisma.llmConnection.findFirst({
+              where: { userId, providerId: 'ollama', isEnabled: true },
+            }));
+
+          if (localConn) {
+            return {
+              providerId: localConn.providerId,
+              modelId: localConn.modelId || (localConn.providerId === 'ollama' ? 'llama3.2' : 'google/gemma-3-4b'),
+              baseUrl: localConn.baseUrl || (localConn.providerId === 'ollama' ? 'http://127.0.0.1:11434/v1' : 'http://127.0.0.1:1234/v1'),
+              executionMode: 'local',
+            };
+          }
+          return {
+            providerId: 'lm-studio',
+            modelId: 'google/gemma-3-4b',
+            baseUrl: 'http://127.0.0.1:1234/v1',
+            executionMode: 'local',
+          };
+        }
+
+        const cloudConn =
           (await this.prisma.llmConnection.findFirst({
             where: { userId, isDefault: true, isEnabled: true },
           })) ||
           (await this.prisma.llmConnection.findFirst({
-            where: { userId, providerId: 'lm-studio', isEnabled: true },
+            where: { userId, providerId: { in: ['gemini', 'groq', 'openai'] }, isEnabled: true },
           }));
 
-        if (conn) {
+        if (cloudConn) {
           return {
-            providerId: conn.providerId,
-            modelId: conn.modelId || 'google/gemma-3-4b',
-            baseUrl: conn.baseUrl || 'http://127.0.0.1:1234/v1',
-            apiKey: conn.apiKey ? Buffer.from(conn.apiKey, 'base64').toString() : undefined,
+            providerId: cloudConn.providerId,
+            modelId: cloudConn.modelId || (cloudConn.providerId === 'groq' ? 'llama-3.3-70b-versatile' : 'google/gemini-2.0-flash'),
+            baseUrl: cloudConn.baseUrl || '',
+            apiKey: cloudConn.apiKey ? Buffer.from(cloudConn.apiKey, 'base64').toString() : undefined,
+            executionMode: 'cloud',
           };
         }
       } catch {
@@ -209,6 +245,7 @@ export class AiProxyService {
       providerId: 'lm-studio',
       modelId: 'google/gemma-3-4b',
       baseUrl: 'http://127.0.0.1:1234/v1',
+      executionMode: 'local',
     };
   }
 
@@ -219,7 +256,8 @@ export class AiProxyService {
   async streamRequest(req: Request, agentId: string, userId: string, signal?: AbortSignal): Promise<Response> {
     const url = `${MASTRA_BASE_URL}/api/agents/${agentId}/stream`;
 
-    const userLlm = await this.getUserLlmContext(userId);
+    const requestedMode = (req.headers['x-execution-mode'] as string) || (req.query?.executionMode as string);
+    const userLlm = await this.getUserLlmContext(userId, requestedMode);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -227,11 +265,12 @@ export class AiProxyService {
       'x-user-id': userId,
       'x-provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
       'x-model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
-      'x-llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl,
+      'x-llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl || '',
+      'x-execution-mode': requestedMode || userLlm.executionMode || 'local',
     };
 
     // Forward optional context headers
-    const forwardHeaders = ['x-user-tier', 'x-tenant-id', 'x-execution-mode', 'x-allow-commands', 'accept-language'];
+    const forwardHeaders = ['x-user-tier', 'x-tenant-id', 'x-allow-commands', 'accept-language'];
     for (const h of forwardHeaders) {
       const val = req.headers[h];
       if (val) {
@@ -240,6 +279,16 @@ export class AiProxyService {
     }
 
     const rawBody = req.body ? normalizeAgentExecutionBody(req.body) : {};
+    rawBody.requestContext = {
+      ...(rawBody.requestContext ?? {}),
+      'user-id': userId,
+      'user-tier': (req.headers['x-user-tier'] as string) || 'free',
+      'tenant-id': (req.headers['x-tenant-id'] as string) || '',
+      'provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
+      'model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
+      'llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl || '',
+      'execution-mode': requestedMode || userLlm.executionMode || 'local',
+    };
 
     let response: Response;
     try {
@@ -262,13 +311,15 @@ export class AiProxyService {
     const method = req.method;
     const userId = (req.user as any)?.id;
 
-    const userLlm = await this.getUserLlmContext(userId);
+    const requestedMode = (req.headers['x-execution-mode'] as string) || (req.query?.executionMode as string);
+    const userLlm = await this.getUserLlmContext(userId, requestedMode);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
       'x-model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
-      'x-llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl,
+      'x-llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl || '',
+      'x-execution-mode': requestedMode || userLlm.executionMode || 'local',
     };
 
     const userHeaders = ['x-user-id', 'x-user-tier', 'x-tenant-id', 'x-allow-commands', 'accept-language'];
@@ -281,6 +332,18 @@ export class AiProxyService {
 
     const rawBody = method !== 'GET' && method !== 'HEAD' ? req.body : undefined;
     const forwardBody = rawBody ? normalizeAgentExecutionBody(rawBody) : undefined;
+    if (forwardBody) {
+      forwardBody.requestContext = {
+        ...(forwardBody.requestContext ?? {}),
+        'user-id': userId,
+        'user-tier': (req.headers['x-user-tier'] as string) || 'free',
+        'tenant-id': (req.headers['x-tenant-id'] as string) || '',
+        'provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
+        'model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
+        'llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl || '',
+        'execution-mode': requestedMode || userLlm.executionMode || 'local',
+      };
+    }
 
     let response: Response;
     try {

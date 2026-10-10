@@ -30,6 +30,8 @@ model User {
   modelConfigs     ModelConfig[]
   llmConnections   LlmConnection[]
   toolConnections  ToolConnection[]
+  automations      Automation[]
+  automationsSeeded Boolean?       @default(false)
 }
 
 model Agent {
@@ -162,7 +164,10 @@ model UserSettings {
   timezone             String   @default("UTC+05:30 – Mumbai, New Delhi")
   language             String   @default("English (US)")
   dateFormat           String   @default("MM/DD/YYYY")
+  timeFormat           String   @default("12-hour (AM/PM)")
   currency             String   @default("USD ($)")
+  numberFormat         String   @default("1,234.56")
+  firstDayOfWeek       String   @default("Monday")
   // Telemetry & Privacy
   telemetryEnabled     Boolean  @default(true)
   crashReportsEnabled  Boolean  @default(true)
@@ -229,5 +234,50 @@ model MarketplaceItem {
   updatedAt   DateTime  @updatedAt
 
   @@map("marketplaceItem")
+model Automation {
+  id            String          @id @default(auto()) @map("_id") @db.ObjectId
+  name          String
+  description   String?         @default("")
+  status        String          @default("Active") // "Active" | "Paused" | "Draft" | "Error"
+  trigger       String          @default("Schedule") // "Schedule" | "Webhook" | "Email" | "Queue" | "Event"
+  cron          String?         @default("0 9 * * *")
+  scheduleLabel String?         @default("Daily at 9:00 AM")
+  timezone      String?         @default("UTC")
+  webhookUrl    String?
+  webhookSecret String?
+  targetType    String          @default("workflow") // "workflow" | "agent"
+  targetId      String          // ID of target workflow or agent
+  inputPayload  Json?
+  executionMode String          @default("cloud") // "cloud" | "local"
+  runs          Int             @default(0)
+  successRuns   Int             @default(0)
+  failedRuns    Int             @default(0)
+  successRate   Float           @default(100.0)
+  lastRun       String?         @default("Never")
+  lastRunAt     DateTime?
+  nextRunAt     DateTime?
+  userId        String          @db.ObjectId
+  user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runsHistory   AutomationRun[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@map("automation")
+}
+
+model AutomationRun {
+  id            String     @id @default(auto()) @map("_id") @db.ObjectId
+  automationId  String     @db.ObjectId
+  automation    Automation @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  status        String     // "Success" | "Failed" | "Running"
+  triggerSource String     @default("manual") // "manual" | "schedule" | "webhook"
+  durationMs    Int?
+  inputPayload  Json?
+  result        Json?
+  error         String?
+  startedAt     DateTime   @default(now())
+  completedAt   DateTime?
+
+  @@map("automationRun")
 }
 

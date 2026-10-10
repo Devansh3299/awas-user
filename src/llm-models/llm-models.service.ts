@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SaveModelConfigDto } from './dto/save-model-config.dto';
 import { LlmConnectionService } from '../llm-connection/llm-connection.service';
 
-const MASTRA_BASE_URL = process.env.MASTRA_BASE_URL || 'http://localhost:4111';
+const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static provider catalogue — the source-of-truth list for the UI
@@ -141,11 +141,13 @@ export class LlmModelsService {
 
     // Auto-discover live local and remote LM Studio models dynamically
     let liveLmStudioModels: any[] = [];
+    let isLmStudioReachable = false;
     try {
       const lmsResult = await this.llmConnectionService.fetchLiveModels('lm-studio');
-      if (lmsResult?.success && Array.isArray(lmsResult.models) && lmsResult.models.length > 0) {
-        liveLmStudioModels = lmsResult.models;
+      if (lmsResult && Array.isArray((lmsResult as any).models) && (lmsResult as any).models.length > 0) {
+        liveLmStudioModels = (lmsResult as any).models;
       }
+      isLmStudioReachable = Boolean((lmsResult as any)?.isServerRunning);
     } catch {
       // ignore
     }
@@ -200,13 +202,17 @@ export class LlmModelsService {
       const rawKey = conn?.apiKey || saved?.apiKey;
       const baseUrl = conn?.baseUrl || saved?.baseUrl || (provider.providerId === 'lm-studio' ? 'http://127.0.0.1:1234/v1' : undefined);
       const modelId = conn?.modelId || saved?.modelId || models[0]?.modelId;
+      const isLms = provider.providerId === 'lm-studio';
+      const resolvedTestStatus = isLms
+        ? (isLmStudioReachable ? (conn?.testStatus || 'ok') : 'error')
+        : (conn?.testStatus || saved?.testStatus);
 
       return {
         ...provider,
         models,
-        // Mastra-reported active status
-        isActiveInMastra: mastraInfo.isActive ?? (provider.providerId === 'lm-studio' ? true : false),
-        activeModelId: mastraInfo.activeModelId ?? (provider.providerId === 'lm-studio' ? modelId : null),
+        // Mastra-reported active status: only true for lm-studio if server is actually reachable
+        isActiveInMastra: mastraInfo.isActive ?? (isLms ? isLmStudioReachable : false),
+        activeModelId: mastraInfo.activeModelId ?? (isLms && isLmStudioReachable ? modelId : null),
         // User's saved config
         userConfig: (saved || conn)
           ? {
@@ -217,8 +223,8 @@ export class LlmModelsService {
               isEnabled: conn?.isEnabled ?? saved?.isEnabled ?? true,
               isDefault: conn?.isDefault ?? saved?.isDefault ?? false,
               lastTested: conn?.lastTested || saved?.lastTested,
-              testStatus: conn?.testStatus || saved?.testStatus,
-              latencyMs: conn?.latencyMs,
+              testStatus: resolvedTestStatus,
+              latencyMs: isLms && !isLmStudioReachable ? 0 : conn?.latencyMs,
             }
           : null,
       };
