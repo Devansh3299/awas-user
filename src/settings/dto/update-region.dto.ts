@@ -17,6 +17,18 @@ export class UpdateRegionDto {
   @IsOptional()
   currency?: string;
 
+  @IsString()
+  @IsOptional()
+  timeFormat?: string;
+
+  @IsString()
+  @IsOptional()
+  numberFormat?: string;
+
+  @IsString()
+  @IsOptional()
+  firstDayOfWeek?: string;
+
   @IsOptional()
   telemetryEnabled?: boolean;
 

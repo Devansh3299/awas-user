@@ -279,6 +279,16 @@ export class AiProxyService {
     }
 
     const rawBody = req.body ? normalizeAgentExecutionBody(req.body) : {};
+    rawBody.requestContext = {
+      ...(rawBody.requestContext ?? {}),
+      'user-id': userId,
+      'user-tier': (req.headers['x-user-tier'] as string) || 'free',
+      'tenant-id': (req.headers['x-tenant-id'] as string) || '',
+      'provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
+      'model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
+      'llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl || '',
+      'execution-mode': requestedMode || userLlm.executionMode || 'local',
+    };
 
     let response: Response;
     try {
@@ -322,6 +332,18 @@ export class AiProxyService {
 
     const rawBody = method !== 'GET' && method !== 'HEAD' ? req.body : undefined;
     const forwardBody = rawBody ? normalizeAgentExecutionBody(rawBody) : undefined;
+    if (forwardBody) {
+      forwardBody.requestContext = {
+        ...(forwardBody.requestContext ?? {}),
+        'user-id': userId,
+        'user-tier': (req.headers['x-user-tier'] as string) || 'free',
+        'tenant-id': (req.headers['x-tenant-id'] as string) || '',
+        'provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
+        'model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
+        'llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl || '',
+        'execution-mode': requestedMode || userLlm.executionMode || 'local',
+      };
+    }
 
     let response: Response;
     try {

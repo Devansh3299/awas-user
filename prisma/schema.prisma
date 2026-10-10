@@ -163,7 +163,10 @@ model UserSettings {
   timezone             String   @default("UTC+05:30 – Mumbai, New Delhi")
   language             String   @default("English (US)")
   dateFormat           String   @default("MM/DD/YYYY")
+  timeFormat           String   @default("12-hour (AM/PM)")
   currency             String   @default("USD ($)")
+  numberFormat         String   @default("1,234.56")
+  firstDayOfWeek       String   @default("Monday")
   // Telemetry & Privacy
   telemetryEnabled     Boolean  @default(true)
   crashReportsEnabled  Boolean  @default(true)
