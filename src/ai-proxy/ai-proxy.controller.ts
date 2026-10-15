@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Param, Req, Res, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { AiProxyService } from './ai-proxy.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import type { Request, Response } from 'express';
 import { Readable } from 'stream';
 
@@ -8,29 +8,29 @@ import { Readable } from 'stream';
 export class AiProxyController {
   constructor(private readonly aiProxyService: AiProxyService) {}
 
-  @UseGuards(JwtAuthGuard)
+  // Public — client dashboard & playground need runtime agent listings without forcing auth redirect
   @Get('agents')
   async listAgents(@Req() req: Request, @Res() res: Response) {
     const agents = await this.aiProxyService.listAgents();
     res.status(200).json(agents);
   }
 
-  @UseGuards(JwtAuthGuard)
+  // Public studio chat agent roster
   @Get('studio-chat')
   async studioChat(@Req() req: Request, @Res() res: Response) {
     const agents = await this.aiProxyService.listAgents();
     res.status(200).json(agents);
   }
 
-  @UseGuards(JwtAuthGuard)
+  // Public agent detail retriever for playground, editor & canvas
   @Get('agents/:id')
   async getAgentById(
     @Param('id') agentId: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const mastraResponse = await this.aiProxyService.proxyRequest(req, `/api/agents/${agentId}`);
-    res.status(mastraResponse.status).json(mastraResponse.data);
+    const engineResponse = await this.aiProxyService.proxyRequest(req, `/api/agents/${agentId}`);
+    res.status(engineResponse.status).json(engineResponse.data);
   }
 
   /**
@@ -38,9 +38,10 @@ export class AiProxyController {
    * POST /ai/agents/:id/stream
    *
    * Real-time SSE streaming execution pipeline for agents.
-   * Pipes Server-Sent Events directly from Mastra (:4111) to the client.
+   * Pipes Server-Sent Events directly from Core Engine to the client.
+   * Supports both authenticated users and guest/sandbox testing.
    */
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('agents/:id/generate')
   @HttpCode(HttpStatus.OK)
   async generate(
@@ -51,7 +52,7 @@ export class AiProxyController {
     return this.handleStreamExecution(agentId, req, res);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('agents/:id/stream')
   @HttpCode(HttpStatus.OK)
   async stream(
@@ -63,16 +64,15 @@ export class AiProxyController {
   }
 
   private async handleStreamExecution(agentId: string, req: Request, res: Response) {
-    const userId = (req.user as any)?.id;
-    if (!userId) {
-      res.status(401).json({ error: 'User not authenticated' });
-      return;
-    }
+    const userId = (req.user as any)?.id || (req.headers['x-user-id'] as string) || 'default-user';
 
-    const hasBalance = await this.aiProxyService.hasSufficientBalance(userId, 1);
-    if (!hasBalance) {
-      res.status(402).json({ error: 'Insufficient token balance' });
-      return;
+    // Verify token balance if this is a registered user account
+    if ((req.user as any)?.id) {
+      const hasBalance = await this.aiProxyService.hasSufficientBalance(userId, 1).catch(() => true);
+      if (!hasBalance) {
+        res.status(402).json({ error: 'Insufficient token balance' });
+        return;
+      }
     }
 
     const abortController = new AbortController();
@@ -86,8 +86,8 @@ export class AiProxyController {
     };
     req.once('close', cleanup);
 
-    // Call Mastra's /stream endpoint and pipe SSE directly
-    const mastraResponse = await this.aiProxyService.streamRequest(req, agentId, userId, abortController.signal);
+    // Call Engine /stream endpoint and pipe SSE directly
+    const engineResponse = await this.aiProxyService.streamRequest(req, agentId, userId, abortController.signal);
 
     // Set SSE headers before anything else
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -96,11 +96,11 @@ export class AiProxyController {
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    // If Mastra returned an error or no body, synthesise an SSE error event
-    if (!mastraResponse.ok || !mastraResponse.body) {
-      let errText = `Mastra error ${mastraResponse.status}`;
+    // If Core Engine returned an error or no body, synthesise an SSE error event
+    if (!engineResponse.ok || !engineResponse.body) {
+      let errText = `Agent Runtime error ${engineResponse.status}`;
       try {
-        const j = await mastraResponse.json();
+        const j = await engineResponse.json();
         errText = j?.error || j?.message || errText;
       } catch {}
       res.write(`data: 3:${JSON.stringify(errText)}\n\n`);
@@ -109,17 +109,19 @@ export class AiProxyController {
       return;
     }
 
-    const contentType = mastraResponse.headers.get('content-type') ?? '';
+    const contentType = engineResponse.headers.get('content-type') ?? '';
 
     if (contentType.includes('text/event-stream')) {
-      // ── True streaming: pipe the SSE body from Mastra directly ──────────
-      nodeStream = Readable.fromWeb(mastraResponse.body as any);
+      // ── True streaming: pipe the SSE body directly ──────────
+      nodeStream = Readable.fromWeb(engineResponse.body as any);
 
       nodeStream.on('data', (chunk) => res.write(chunk));
 
       nodeStream.on('end', async () => {
         res.end();
-        try { await this.aiProxyService.deductTokens(userId); } catch {}
+        if ((req.user as any)?.id) {
+          try { await this.aiProxyService.deductTokens(userId); } catch {}
+        }
       });
 
       nodeStream.on('error', (err) => {
@@ -132,9 +134,9 @@ export class AiProxyController {
       });
 
     } else {
-      // ── JSON response from Mastra: synthesise SSE tokens from the text ──
+      // ── JSON response: synthesise SSE tokens from the text ──
       let json: any = {};
-      try { json = await mastraResponse.json(); } catch {}
+      try { json = await engineResponse.json(); } catch {}
 
       const text: string =
         json?.text ||
@@ -166,67 +168,69 @@ export class AiProxyController {
 
       res.write(`data: d:{"finishReason":"${json?.finishReason ?? 'stop'}"}\n\n`);
       res.end();
-      try { await this.aiProxyService.deductTokens(userId); } catch {}
+      if ((req.user as any)?.id) {
+        try { await this.aiProxyService.deductTokens(userId); } catch {}
+      }
     }
   }
 
-  @UseGuards(JwtAuthGuard)
+  // Public workflow roster
   @Get('workflows')
   async listWorkflows(@Res() res: Response) {
     const workflows = await this.aiProxyService.listWorkflows();
     res.status(200).json(workflows);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Post('workflows/:id/run')
   async runWorkflow(
     @Param('id') workflowId: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const userId = (req.user as any)?.id;
-    if (!userId) {
-      res.status(401).json({ error: 'User not authenticated' });
-      return;
-    }
+    const userId = (req.user as any)?.id || (req.headers['x-user-id'] as string) || 'default-user';
 
-    const hasBalance = await this.aiProxyService.hasSufficientBalance(userId, 1);
-    if (!hasBalance) {
-      res.status(402).json({ error: 'Insufficient token balance' });
-      return;
+    if ((req.user as any)?.id) {
+      const hasBalance = await this.aiProxyService.hasSufficientBalance(userId, 1).catch(() => true);
+      if (!hasBalance) {
+        res.status(402).json({ error: 'Insufficient token balance' });
+        return;
+      }
     }
 
     const result = await this.aiProxyService.runWorkflow(workflowId, req.body, userId);
-    try {
-      await this.aiProxyService.deductTokens(userId);
-    } catch {}
+    if ((req.user as any)?.id) {
+      try {
+        await this.aiProxyService.deductTokens(userId);
+      } catch {}
+    }
 
     res.status(200).json(result);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('memory/threads')
   async getThreads(@Req() req: Request, @Res() res: Response) {
-    const mastraResponse = await this.aiProxyService.proxyRequest(req);
-    res.status(mastraResponse.status).json(mastraResponse.data);
+    const engineResponse = await this.aiProxyService.proxyRequest(req);
+    res.status(engineResponse.status).json(engineResponse.data);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('memory/threads/:id/messages')
   async getMessages(
     @Param('id') threadId: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const mastraResponse = await this.aiProxyService.proxyRequest(req, `/api/memory/threads/${threadId}/messages`);
-    res.status(mastraResponse.status).json(mastraResponse.data);
+    const engineResponse = await this.aiProxyService.proxyRequest(req, `/api/memory/threads/${threadId}/messages`);
+    res.status(engineResponse.status).json(engineResponse.data);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('logs')
   async getLogs(@Req() req: Request, @Res() res: Response) {
     const transportId = (req.query as any).transportId ?? 'default';
-    const mastraResponse = await this.aiProxyService.proxyRequest(req, `/api/logs?transportId=${transportId}`);
-    res.status(mastraResponse.status).json(mastraResponse.data);
+    const engineResponse = await this.aiProxyService.proxyRequest(req, `/api/logs?transportId=${transportId}`);
+    res.status(engineResponse.status).json(engineResponse.data);
   }
 }

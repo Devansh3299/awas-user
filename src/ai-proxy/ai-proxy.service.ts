@@ -72,7 +72,7 @@ export class AiProxyService {
       return list;
     } catch (err: any) {
       if (this.agentCache) return this.agentCache.data;
-      throw new BadRequestException(`Failed to reach Mastra service: ${err.message}`);
+      throw new BadRequestException(`Failed to reach Platform Engine: ${err.message}`);
     }
   }
 
@@ -98,7 +98,7 @@ export class AiProxyService {
       return data;
     } catch (err: any) {
       if (this.workflowCache) return this.workflowCache.data;
-      throw new BadRequestException(`Failed to reach Mastra workflows: ${err.message}`);
+      throw new BadRequestException(`Failed to reach Platform Engine workflows: ${err.message}`);
     }
   }
 
@@ -126,7 +126,7 @@ export class AiProxyService {
       const createData = await createRes.json();
       runId = createData.runId;
       if (!runId) {
-        throw new Error('Mastra did not return a runId for workflow execution');
+        throw new Error('Engine did not return a runId for workflow execution');
       }
     } catch (err: any) {
       throw new BadRequestException(`Failed to initialize workflow run: ${err.message}`);
@@ -298,8 +298,8 @@ export class AiProxyService {
         body: JSON.stringify(rawBody),
         signal,
       });
-    } catch (err) {
-      throw new BadRequestException(`Failed to reach Mastra service: ${err.message}`);
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to reach Platform Engine: ${err.message}`);
     }
 
     return response;
@@ -309,20 +309,21 @@ export class AiProxyService {
     const targetPath = overridePath ?? this.mapAiToMastraPath(req.url);
     const url = `${MASTRA_BASE_URL}${targetPath}`;
     const method = req.method;
-    const userId = (req.user as any)?.id;
+    const userId = (req.user as any)?.id || (req.headers['x-user-id'] as string) || 'default-user';
 
     const requestedMode = (req.headers['x-execution-mode'] as string) || (req.query?.executionMode as string);
     const userLlm = await this.getUserLlmContext(userId, requestedMode);
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'x-user-id': userId,
       'x-provider-id': (req.headers['x-provider-id'] as string) || userLlm.providerId,
       'x-model-id': (req.headers['x-model-id'] as string) || userLlm.modelId,
       'x-llm-base-url': (req.headers['x-llm-base-url'] as string) || userLlm.baseUrl || '',
       'x-execution-mode': requestedMode || userLlm.executionMode || 'local',
     };
 
-    const userHeaders = ['x-user-id', 'x-user-tier', 'x-tenant-id', 'x-allow-commands', 'accept-language'];
+    const userHeaders = ['x-user-tier', 'x-tenant-id', 'x-allow-commands', 'accept-language'];
     for (const h of userHeaders) {
       const val = req.headers[h];
       if (val) {
@@ -352,8 +353,8 @@ export class AiProxyService {
         headers,
         body: forwardBody ? JSON.stringify(forwardBody) : undefined,
       });
-    } catch (err) {
-      throw new BadRequestException(`Failed to reach Mastra service: ${err.message}`);
+    } catch (err: any) {
+      throw new BadRequestException(`Failed to reach Platform Engine: ${err.message}`);
     }
 
     const data = await response.json();

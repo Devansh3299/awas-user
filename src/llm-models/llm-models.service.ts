@@ -200,6 +200,7 @@ export class LlmModelsService {
       }
 
       const rawKey = conn?.apiKey || saved?.apiKey;
+      const plainKey = this.decodeApiKey(rawKey);
       const baseUrl = conn?.baseUrl || saved?.baseUrl || (provider.providerId === 'lm-studio' ? 'http://127.0.0.1:1234/v1' : undefined);
       const modelId = conn?.modelId || saved?.modelId || models[0]?.modelId;
       const isLms = provider.providerId === 'lm-studio';
@@ -217,7 +218,7 @@ export class LlmModelsService {
         userConfig: (saved || conn)
           ? {
               hasApiKey: !!rawKey,
-              apiKeyMasked: rawKey ? this.maskKey(rawKey) : null,
+              apiKeyMasked: plainKey ? this.maskKey(plainKey) : (rawKey ? this.maskKey(rawKey) : null),
               baseUrl,
               modelId,
               isEnabled: conn?.isEnabled ?? saved?.isEnabled ?? true,
@@ -359,26 +360,45 @@ export class LlmModelsService {
    * If Mastra doesn't have the endpoint, falls back to a lightweight direct ping.
    */
   async testConnection(userId: string, providerId: string, apiKey?: string, baseUrl?: string, modelId?: string) {
-    // Try Mastra's test endpoint first
-    try {
-      const resp = await fetch(`${MASTRA_BASE_URL}/custom/models/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId, apiKey, baseUrl, modelId }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (resp.ok) {
-        const result = await resp.json();
-        // Update test status in DB
-        await this.updateTestStatus(userId, providerId, result.success ? 'ok' : 'error', result.latencyMs);
-        return result;
+    let resolvedApiKey = apiKey ? this.decodeApiKey(apiKey) : undefined;
+    let resolvedBaseUrl = baseUrl;
+    let resolvedModelId = modelId;
+
+    if (userId) {
+      try {
+        const [saved, conn] = await Promise.all([
+          this.prisma.modelConfig.findUnique({ where: { userId_providerId: { userId, providerId } } }),
+          this.prisma.llmConnection.findUnique({ where: { userId_providerId: { userId, providerId } } }),
+        ]);
+
+        if (!resolvedApiKey) {
+          const raw = conn?.apiKey || saved?.apiKey;
+          if (raw) {
+            resolvedApiKey = this.decodeApiKey(raw);
+          }
+        }
+        if (!resolvedBaseUrl) {
+          resolvedBaseUrl = conn?.baseUrl || saved?.baseUrl || undefined;
+        }
+        if (!resolvedModelId) {
+          resolvedModelId = conn?.modelId || saved?.modelId || undefined;
+        }
+      } catch (err) {
+        this.logger.warn(`Could not resolve user saved credentials for test: ${err.message}`);
       }
-    } catch (err) {
-      this.logger.warn(`Mastra /api/models/test failed: ${err.message}. Using fallback ping.`);
     }
 
-    // Fallback: direct provider ping
-    const result = await this.directProviderPing(providerId, apiKey, baseUrl, modelId);
+    const provider = PROVIDER_CATALOGUE.find((p) => p.providerId === providerId);
+    if (provider?.requiresApiKey && !resolvedApiKey) {
+      return {
+        success: false,
+        latencyMs: 0,
+        message: `No API key configured for ${provider.displayName || providerId}. Please enter or save your API key.`,
+      };
+    }
+
+    // Direct provider ping
+    const result = await this.directProviderPing(providerId, resolvedApiKey, resolvedBaseUrl, resolvedModelId);
     await this.updateTestStatus(userId, providerId, result.success ? 'ok' : 'error', result.latencyMs);
     return result;
   }
@@ -386,40 +406,34 @@ export class LlmModelsService {
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   private async updateTestStatus(userId: string, providerId: string, status: 'ok' | 'error', latencyMs?: number) {
+    if (!userId) return;
     try {
-      await this.prisma.modelConfig.upsert({
+      const existing = await this.prisma.modelConfig.findUnique({
         where: { userId_providerId: { userId, providerId } },
-        create: {
-          userId,
-          providerId,
-          isEnabled: true,
-          isDefault: false,
-          testStatus: status,
-          lastTested: new Date(),
-        },
-        update: {
-          testStatus: status,
-          lastTested: new Date(),
-        },
       });
+      if (existing) {
+        await this.prisma.modelConfig.update({
+          where: { userId_providerId: { userId, providerId } },
+          data: {
+            testStatus: status,
+            lastTested: new Date(),
+          },
+        });
+      }
 
-      await this.prisma.llmConnection.upsert({
+      const existingConn = await this.prisma.llmConnection.findUnique({
         where: { userId_providerId: { userId, providerId } },
-        create: {
-          userId,
-          providerId,
-          isEnabled: true,
-          isDefault: false,
-          testStatus: status,
-          lastTested: new Date(),
-          latencyMs,
-        },
-        update: {
-          testStatus: status,
-          lastTested: new Date(),
-          latencyMs,
-        },
       });
+      if (existingConn) {
+        await this.prisma.llmConnection.update({
+          where: { userId_providerId: { userId, providerId } },
+          data: {
+            testStatus: status,
+            lastTested: new Date(),
+            latencyMs,
+          },
+        });
+      }
     } catch (err) {
       this.logger.warn(`Failed to update test status: ${err.message}`);
     }
@@ -441,8 +455,8 @@ export class LlmModelsService {
     try {
       switch (providerId) {
         case 'groq': {
-          const key = apiKey ?? process.env.GROQ_API_KEY;
-          if (!key) return { success: false, latencyMs: 0, message: 'No Groq API key configured' };
+          const key = apiKey;
+          if (!key) return { success: false, latencyMs: 0, message: 'No Groq API key configured for user' };
           const resp = await fetch('https://api.groq.com/openai/v1/models', {
             headers: { Authorization: `Bearer ${key}` },
             signal: AbortSignal.timeout(10000),
@@ -453,13 +467,13 @@ export class LlmModelsService {
           }
           const data = await resp.json();
           const models = data?.data?.map((m: any) => m.id) ?? [];
-          return { success: true, latencyMs: Date.now() - start, message: `Connected. ${models.length} models available.`, modelId: modelId ?? 'llama-3.3-70b-versatile' };
+          return { success: true, latencyMs: Date.now() - start, message: `Connected. ${models.length} models available.`, modelId: modelId ?? 'qwen/qwen3.8-27b' };
         }
 
         case 'gemini': {
-          const key = apiKey ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+          const key = apiKey;
           if (!key || key === 'your-google-api-key') {
-            return { success: false, latencyMs: 0, message: 'No Google Gemini API key configured' };
+            return { success: false, latencyMs: 0, message: 'No Google Gemini API key configured for user' };
           }
           const resp = await fetch(
             `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`,
@@ -491,8 +505,8 @@ export class LlmModelsService {
         }
 
         case 'openai': {
-          const key = apiKey ?? process.env.OPENAI_API_KEY;
-          if (!key) return { success: false, latencyMs: 0, message: 'No OpenAI API key configured' };
+          const key = apiKey;
+          if (!key) return { success: false, latencyMs: 0, message: 'No OpenAI API key configured for user' };
           const base = baseUrl ?? 'https://api.openai.com/v1';
           const resp = await fetch(`${base}/models`, {
             headers: { Authorization: `Bearer ${key}` },
@@ -548,6 +562,22 @@ export class LlmModelsService {
     } catch (err) {
       return { success: false, latencyMs: Date.now() - start, message: err.message ?? 'Connection failed' };
     }
+  }
+
+  private decodeApiKey(key?: string | null): string | undefined {
+    if (!key) return undefined;
+    if (key.startsWith('gsk_') || key.startsWith('sk-') || key.startsWith('AIza')) {
+      return key;
+    }
+    try {
+      const decoded = Buffer.from(key, 'base64').toString('utf-8');
+      if (/^[\x20-\x7E]+$/.test(decoded) && decoded.length > 0) {
+        return decoded;
+      }
+    } catch {
+      // ignore
+    }
+    return key;
   }
 
   private maskKey(key: string): string {

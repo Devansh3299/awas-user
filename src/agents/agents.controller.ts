@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Req } from '@nestjs/common';
 import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
@@ -42,4 +42,18 @@ export class AgentsController {
   remove(@Param('id') id: string) {
     return this.agentsService.remove(id);
   }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/publish')
+  publish(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    const userId = req.user?.id;
+    return this.agentsService.publish(id, body, userId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/unpublish')
+  unpublish(@Param('id') id: string) {
+    return this.agentsService.unpublish(id);
+  }
 }
+

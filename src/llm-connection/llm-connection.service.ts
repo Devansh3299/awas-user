@@ -109,7 +109,7 @@ export const PROVIDER_CATALOG: ProviderCatalogItem[] = [
 export class LlmConnectionService {
   private readonly logger = new Logger(LlmConnectionService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   /**
    * List all connections for user in the `llmConnection` collection,
@@ -173,23 +173,23 @@ export class LlmConnectionService {
         models,
         connection: connection
           ? {
-              id: connection.id,
-              name: connection.name,
-              baseUrl: connection.baseUrl,
-              modelId: connection.modelId,
-              isEnabled: connection.isEnabled,
-              isDefault: connection.isDefault,
-              hasApiKey: !!connection.apiKey,
-              apiKeyMasked: connection.apiKey ? this.maskKey(connection.apiKey) : null,
-              lastTested: connection.lastTested,
-              testStatus: isLmStudio && !isLmStudioRunning ? 'error' : connection.testStatus,
-              latencyMs: connection.latencyMs,
-              availableModelsCount: Array.isArray(connection.availableModels)
-                ? connection.availableModels.length
-                : models.length,
-            }
+            id: connection.id,
+            name: connection.name,
+            baseUrl: connection.baseUrl,
+            modelId: connection.modelId,
+            isEnabled: connection.isEnabled,
+            isDefault: connection.isDefault,
+            hasApiKey: !!connection.apiKey,
+            apiKeyMasked: connection.apiKey ? this.maskKey(connection.apiKey) : null,
+            lastTested: connection.lastTested,
+            testStatus: isLmStudio && !isLmStudioRunning ? 'error' : connection.testStatus,
+            latencyMs: connection.latencyMs,
+            availableModelsCount: Array.isArray(connection.availableModels)
+              ? connection.availableModels.length
+              : models.length,
+          }
           : isLmStudio && isLmStudioRunning && lmStudioLiveModels.length > 0
-          ? {
+            ? {
               id: null,
               name: 'LM Studio (Auto-Discovered)',
               baseUrl: DEFAULT_LM_STUDIO_URL,
@@ -203,7 +203,7 @@ export class LlmConnectionService {
               latencyMs: 15,
               availableModelsCount: lmStudioLiveModels.length,
             }
-          : null,
+            : null,
       };
     });
   }
@@ -483,8 +483,8 @@ export class LlmConnectionService {
       const remoteBadge = m.isRemote
         ? `[Remote: ${m.devices.join(', ')}]`
         : m.devices.length > 1
-        ? `[Local & ${m.devices.filter((d: string) => d !== 'Local').join(', ')}]`
-        : '[Local]';
+          ? `[Local & ${m.devices.filter((d: string) => d !== 'Local').join(', ')}]`
+          : '[Local]';
       const loadedBadge = m.isLoaded ? '🟢 ' : '';
 
       return {
@@ -527,8 +527,8 @@ export class LlmConnectionService {
     }
 
     if (providerId === 'groq') {
-      const key = apiKey || process.env.GROQ_API_KEY;
-      if (!key) throw new Error('Groq API key required to fetch models');
+      const key = apiKey;
+      if (!key) throw new Error('No Groq API key configured for user');
       const resp = await fetch('https://api.groq.com/openai/v1/models', {
         headers: { Authorization: `Bearer ${key}` },
         signal: AbortSignal.timeout(8000),
@@ -543,8 +543,8 @@ export class LlmConnectionService {
     }
 
     if (providerId === 'openai') {
-      const key = apiKey || process.env.OPENAI_API_KEY;
-      if (!key) throw new Error('OpenAI API key required');
+      const key = apiKey;
+      if (!key) throw new Error('No OpenAI API key configured for user');
       const base = targetUrl || 'https://api.openai.com/v1';
       const resp = await fetch(`${base}/models`, {
         headers: { Authorization: `Bearer ${key}` },
@@ -560,8 +560,8 @@ export class LlmConnectionService {
     }
 
     if (providerId === 'gemini') {
-      const key = apiKey || process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.GEMINI_API_KEY;
-      if (!key) throw new Error('Google Gemini API key required to fetch models');
+      const key = apiKey;
+      if (!key) throw new Error('No Google Gemini API key configured for user');
       const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`, {
         signal: AbortSignal.timeout(8000),
       });
@@ -651,7 +651,41 @@ export class LlmConnectionService {
     modelId?: string,
   ) {
     const start = Date.now();
-    const targetUrl = (baseUrl || (providerId === 'lm-studio' ? DEFAULT_LM_STUDIO_URL : '')).replace(/\/+$/, '');
+    let resolvedApiKey = apiKey ? this.decodeApiKey(apiKey) : undefined;
+    let resolvedBaseUrl = baseUrl;
+    let resolvedModelId = modelId;
+
+    if (userId) {
+      try {
+        const [conn, saved] = await Promise.all([
+          this.prisma.llmConnection.findUnique({ where: { userId_providerId: { userId, providerId } } }),
+          this.prisma.modelConfig.findUnique({ where: { userId_providerId: { userId, providerId } } }),
+        ]);
+        if (!resolvedApiKey) {
+          const raw = conn?.apiKey || saved?.apiKey;
+          if (raw) resolvedApiKey = this.decodeApiKey(raw);
+        }
+        if (!resolvedBaseUrl) {
+          resolvedBaseUrl = conn?.baseUrl || saved?.baseUrl || undefined;
+        }
+        if (!resolvedModelId) {
+          resolvedModelId = conn?.modelId || saved?.modelId || undefined;
+        }
+      } catch (err) {
+        this.logger.warn(`Could not resolve credentials for testConnection: ${err.message}`);
+      }
+    }
+
+    const catalogItem = PROVIDER_CATALOG.find((c) => c.providerId === providerId);
+    if (catalogItem?.requiresApiKey && !resolvedApiKey) {
+      return {
+        success: false,
+        latencyMs: 0,
+        message: `No API key configured for ${catalogItem.displayName || providerId}. Please enter or save your API key.`,
+      };
+    }
+
+    const targetUrl = (resolvedBaseUrl || (providerId === 'lm-studio' ? DEFAULT_LM_STUDIO_URL : '')).replace(/\/+$/, '');
 
     try {
       if (providerId === 'lm-studio') {
@@ -721,57 +755,47 @@ export class LlmConnectionService {
       }
 
       // Generic fallback for other providers
-      const modelsResult = await this.fetchLiveModels(providerId, baseUrl, apiKey);
+      const modelsResult = await this.fetchLiveModels(providerId, resolvedBaseUrl, resolvedApiKey);
       const latencyMs = Date.now() - start;
 
-      await this.prisma.llmConnection.upsert({
+      const existingConn = await this.prisma.llmConnection.findUnique({
         where: { userId_providerId: { userId, providerId } },
-        create: {
-          userId,
-          providerId,
-          baseUrl: targetUrl,
-          modelId,
-          availableModels: modelsResult.models,
-          isEnabled: true,
-          testStatus: 'ok',
-          lastTested: new Date(),
-          latencyMs,
-        },
-        update: {
-          testStatus: 'ok',
-          lastTested: new Date(),
-          latencyMs,
-          availableModels: modelsResult.models,
-        },
       });
+      if (existingConn) {
+        await this.prisma.llmConnection.update({
+          where: { userId_providerId: { userId, providerId } },
+          data: {
+            testStatus: 'ok',
+            lastTested: new Date(),
+            latencyMs,
+            availableModels: modelsResult.models,
+          },
+        });
+      }
 
       return {
         success: true,
         latencyMs,
         message: `Connected to ${providerId}. ${modelsResult.count} model(s) retrieved.`,
-        modelId,
+        modelId: resolvedModelId,
         availableModels: modelsResult.models,
       };
     } catch (err) {
       const latencyMs = Date.now() - start;
       try {
-        await this.prisma.llmConnection.upsert({
+        const existingConn = await this.prisma.llmConnection.findUnique({
           where: { userId_providerId: { userId, providerId } },
-          create: {
-            userId,
-            providerId,
-            baseUrl: targetUrl,
-            isEnabled: true,
-            testStatus: 'error',
-            lastTested: new Date(),
-            latencyMs,
-          },
-          update: {
-            testStatus: 'error',
-            lastTested: new Date(),
-            latencyMs,
-          },
         });
+        if (existingConn) {
+          await this.prisma.llmConnection.update({
+            where: { userId_providerId: { userId, providerId } },
+            data: {
+              testStatus: 'error',
+              lastTested: new Date(),
+              latencyMs,
+            },
+          });
+        }
       } catch {
         // ignore
       }
@@ -784,9 +808,26 @@ export class LlmConnectionService {
     }
   }
 
+  private decodeApiKey(key?: string | null): string | undefined {
+    if (!key) return undefined;
+    if (key.startsWith('gsk_') || key.startsWith('sk-') || key.startsWith('AIza')) {
+      return key;
+    }
+    try {
+      const decoded = Buffer.from(key, 'base64').toString('utf-8');
+      if (/^[\x20-\x7E]+$/.test(decoded) && decoded.length > 0) {
+        return decoded;
+      }
+    } catch {
+      // ignore
+    }
+    return key;
+  }
+
   private maskKey(key: string): string {
     if (!key) return '';
-    if (key.length <= 8) return '••••••••';
-    return key.slice(0, 4) + '••••••••' + key.slice(-4);
+    const plain = this.decodeApiKey(key) || key;
+    if (plain.length <= 8) return '••••••••';
+    return plain.slice(0, 4) + '••••••••' + plain.slice(-4);
   }
 }

@@ -65,7 +65,6 @@ export class ToolsController {
 
   // ── Tools Catalogue Endpoints ─────────────────────────────────────────────
 
-  @UseGuards(JwtAuthGuard)
   @Get(['ai/tools', 'tools'])
   async listTools(
     @Query('category') category?: string,
@@ -74,7 +73,6 @@ export class ToolsController {
     return this.toolsService.listTools(category, query);
   }
 
-  @UseGuards(JwtAuthGuard)
   @Get(['ai/tools/:id', 'tools/:id'])
   async getToolById(@Param('id') toolId: string) {
     return this.toolsService.getToolById(toolId);
@@ -82,7 +80,6 @@ export class ToolsController {
 
   // ── Sandbox Tool Execution ────────────────────────────────────────────────
 
-  @UseGuards(JwtAuthGuard)
   @Post(['ai/tools/:id/execute', 'tools/:id/execute'])
   @HttpCode(HttpStatus.OK)
   async executeTool(

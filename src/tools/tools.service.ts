@@ -119,6 +119,49 @@ export const FALLBACK_TOOLS_CATALOGUE: ToolMetadata[] = [
     credentialKey: 'GOOGLE_SHEETS_KEY',
   },
   {
+    id: 'github-get-branches',
+    name: 'GitHub Branches Explorer',
+    description: 'Fetch all branches of a GitHub repository with commit SHAs and protection status.',
+    category: 'Code & Repositories',
+    icon: 'GitBranch',
+    parameters: [
+      { name: 'owner', type: 'string', description: 'Repository owner or organization name', required: true },
+      { name: 'repo', type: 'string', description: 'Repository name', required: true },
+    ],
+    sampleInput: { owner: 'devansh18', repo: 'awas' },
+    requiresCredentials: false,
+    credentialKey: 'GITHUB_TOKEN',
+  },
+  {
+    id: 'github-get-repo-details',
+    name: 'GitHub Repository Auditor',
+    description: 'Fetch GitHub repository metadata including stars, forks, open issues, default branch, language, and topics.',
+    category: 'Code & Repositories',
+    icon: 'Github',
+    parameters: [
+      { name: 'owner', type: 'string', description: 'Repository owner or organization name', required: true },
+      { name: 'repo', type: 'string', description: 'Repository name', required: true },
+    ],
+    sampleInput: { owner: 'devansh18', repo: 'awas' },
+    requiresCredentials: false,
+    credentialKey: 'GITHUB_TOKEN',
+  },
+  {
+    id: 'github-list-prs',
+    name: 'GitHub Pull Requests Explorer',
+    description: 'List pull requests for a GitHub repository by state (open, closed, all).',
+    category: 'Code & Repositories',
+    icon: 'GitPullRequest',
+    parameters: [
+      { name: 'owner', type: 'string', description: 'Repository owner or organization name', required: true },
+      { name: 'repo', type: 'string', description: 'Repository name', required: true },
+      { name: 'state', type: 'enum', description: 'Pull request state', required: false, options: ['open', 'closed', 'all'], defaultValue: 'open' },
+    ],
+    sampleInput: { owner: 'devansh18', repo: 'awas', state: 'open' },
+    requiresCredentials: false,
+    credentialKey: 'GITHUB_TOKEN',
+  },
+  {
     id: 'github-get-pr-diff',
     name: 'GitHub PR Auditor',
     description: 'Fetch Pull Request diffs, commit changes, and modified files from GitHub repositories.',
@@ -334,7 +377,7 @@ export class ToolsService {
       return {
         success: false,
         toolId,
-        error: `Failed to reach Mastra engine: ${err.message}`,
+        error: `Failed to reach Platform Engine: ${err.message}`,
         latencyMs,
         timestamp: new Date().toISOString(),
       };
