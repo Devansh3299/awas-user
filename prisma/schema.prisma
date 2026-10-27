@@ -32,6 +32,7 @@ model User {
   toolConnections  ToolConnection[]
   automations      Automation[]
   automationsSeeded Boolean?       @default(false)
+  chatThreads      ChatThread[]
 }
 
 model Agent {
@@ -281,5 +282,43 @@ model AutomationRun {
   completedAt   DateTime?
 
   @@map("automationRun")
+}
+
+model ChatThread {
+  id          String        @id @default(auto()) @map("_id") @db.ObjectId
+  threadId    String        @unique // unique frontend or session ID (e.g. session-xxx, thread-xxx, UUID)
+  title       String        @default("New Chat")
+  type        String        @default("agent") // "studio" | "agent" | "workflow"
+  userId      String        @db.ObjectId
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agentId     String?       // specific agent ID (e.g. studio-chat-agent, deep-search-agent, etc.)
+  workflowId  String?       // specific workflow ID (e.g. wf-xxx)
+  metadata    Json?         // optional arbitrary config / metadata (model, systemPrompt, settings)
+  messages    ChatMessage[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([userId, agentId])
+  @@index([userId, workflowId])
+  @@map("chatThread")
+}
+
+model ChatMessage {
+  id           String      @id @default(auto()) @map("_id") @db.ObjectId
+  messageId    String?     // client-side message ID (UUID)
+  chatThreadId String      @db.ObjectId
+  thread       ChatThread  @relation(fields: [chatThreadId], references: [id], onDelete: Cascade)
+  role         String      // "user" | "assistant" | "system"
+  content      String      @default("")
+  reasoning    String?
+  toolCalls    Json?
+  usage        Json?
+  feedback     String?
+  metadata     Json?
+  createdAt    DateTime    @default(now())
+
+  @@index([chatThreadId])
+  @@map("chatMessage")
 }
 

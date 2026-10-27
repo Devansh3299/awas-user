@@ -14,6 +14,7 @@ import { SettingsModule } from './settings/settings.module';
 import { ToolsModule } from './tools/tools.module';
 import { AutomationsModule } from './automations/automations.module';
 import { MarketplaceModule } from './marketplace/marketplace.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MarketplaceModule } from './marketplace/marketplace.module';
     ToolsModule,
     AutomationsModule,
     MarketplaceModule,
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],
