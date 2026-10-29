@@ -140,7 +140,7 @@ export class AiProxyService {
           'Content-Type': 'application/json',
           'x-user-id': userId,
           'x-provider-id': userLlm.providerId,
-          'x-model-id': userLlm.modelId,
+          'x-model-id': input?.modelId || userLlm.modelId,
           'x-llm-base-url': userLlm.baseUrl,
           'x-execution-mode': userLlm.executionMode,
         },
@@ -149,7 +149,7 @@ export class AiProxyService {
           requestContext: {
             'user-id': userId,
             'provider-id': userLlm.providerId,
-            'model-id': userLlm.modelId,
+            'model-id': input?.modelId || userLlm.modelId,
             'llm-base-url': userLlm.baseUrl,
             'execution-mode': userLlm.executionMode,
           },
