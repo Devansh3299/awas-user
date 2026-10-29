@@ -28,4 +28,12 @@ export class CreateMessageDto {
 
   @IsOptional()
   metadata?: any;
+
+  @IsString()
+  @IsOptional()
+  workflowId?: string;
+
+  @IsString()
+  @IsOptional()
+  agentId?: string;
 }

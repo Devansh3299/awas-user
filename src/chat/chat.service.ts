@@ -23,14 +23,15 @@ export class ChatService {
   async getThreads(userId: string, filters?: { type?: string; agentId?: string; workflowId?: string }) {
     const where: any = { userId };
 
-    if (filters?.type) {
-      where.type = filters.type;
-    }
-    if (filters?.agentId) {
-      where.agentId = filters.agentId;
-    }
     if (filters?.workflowId) {
       where.workflowId = filters.workflowId;
+    } else {
+      if (filters?.type) {
+        where.type = filters.type;
+      }
+      if (filters?.agentId) {
+        where.agentId = filters.agentId;
+      }
     }
 
     const threads = await this.chatThreadModel.findMany({
@@ -94,6 +95,23 @@ export class ChatService {
     if (existing) {
       if (existing.userId !== userId) {
         throw new ForbiddenException('Access denied to this chat thread.');
+      }
+      const dataToUpdate: any = {};
+      if (dto.workflowId && existing.workflowId !== dto.workflowId) {
+        dataToUpdate.workflowId = dto.workflowId;
+        dataToUpdate.type = 'workflow';
+      }
+      if (dto.agentId && !existing.agentId) {
+        dataToUpdate.agentId = dto.agentId;
+      }
+      if (dto.title && (!existing.title || existing.title === 'New Chat')) {
+        dataToUpdate.title = dto.title;
+      }
+      if (Object.keys(dataToUpdate).length > 0) {
+        return this.chatThreadModel.update({
+          where: { id: existing.id },
+          data: dataToUpdate,
+        });
       }
       return existing;
     }
@@ -180,6 +198,17 @@ export class ChatService {
       thread = await this.createOrGetThread(userId, {
         threadId,
         title: dto.role === 'user' && dto.content ? dto.content.slice(0, 40) : 'New Chat',
+        workflowId: dto.workflowId,
+        agentId: dto.agentId,
+        type: dto.workflowId ? 'workflow' : (dto.agentId && dto.agentId !== 'studio-chat-agent' ? 'agent' : 'studio'),
+      });
+    } else if (dto.workflowId && !thread.workflowId) {
+      thread = await this.chatThreadModel.update({
+        where: { id: thread.id },
+        data: {
+          workflowId: dto.workflowId,
+          type: 'workflow',
+        },
       });
     }
 
@@ -278,14 +307,21 @@ export class ChatService {
       if (thread.userId !== userId) {
         throw new ForbiddenException('Access denied to this chat thread.');
       }
-      if (dto.title || dto.metadata) {
+      const dataToUpdate: any = {};
+      if (dto.title) dataToUpdate.title = dto.title;
+      if (dto.metadata) dataToUpdate.metadata = dto.metadata;
+      if (dto.workflowId && (!thread.workflowId || thread.workflowId !== dto.workflowId)) {
+        dataToUpdate.workflowId = dto.workflowId;
+        dataToUpdate.type = 'workflow';
+      }
+      if (dto.agentId && !thread.agentId) {
+        dataToUpdate.agentId = dto.agentId;
+      }
+      if (Object.keys(dataToUpdate).length > 0) {
+        dataToUpdate.updatedAt = new Date();
         thread = await this.chatThreadModel.update({
           where: { id: thread.id },
-          data: {
-            title: dto.title || thread.title,
-            metadata: dto.metadata || thread.metadata,
-            updatedAt: new Date(),
-          },
+          data: dataToUpdate,
         });
       }
     } else {
