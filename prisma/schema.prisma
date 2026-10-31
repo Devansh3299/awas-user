@@ -23,6 +23,7 @@ model User {
   settings         UserSettings?
   apiTokens        ApiToken[]
   workflows        Workflow[]
+  workflowRuns     WorkflowRun[]
   marketplaceItems MarketplaceItem[]
   refreshToken     String?
   createdAt        DateTime        @default(now())
@@ -322,3 +323,32 @@ model ChatMessage {
   @@map("chatMessage")
 }
 
+
+/// Crew Studio workflow execution run (Runs section in the canvas runner panel).
+/// Stored in MongoDB in the `workflowRun` collection, scoped by workflowId + userId.
+model WorkflowRun {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  runId        String   @unique // frontend run-xxx ID
+  workflowId   String   // frontend wf-xxx ID
+  userId       String   @db.ObjectId
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workflowName String   @default("Workflow Execution")
+  status       String   @default("Success") // "Success" | "Failed" | "Stopped" | "Running"
+  duration     String?
+  agentCount   Int?
+  agentsUsed   Json?
+  inputs       Json?
+  inputTopic   String?
+  outputResult String?
+  logs         Json?
+  timelineTree Json?
+  metrics      Json?
+  error        String?
+  startedAt    DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, workflowId])
+  @@map("workflowRun")
+}
