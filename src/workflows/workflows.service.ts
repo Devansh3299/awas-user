@@ -4,6 +4,18 @@ import { CreateWorkflowDto } from './dto/create-workflow.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { CreateWorkflowRunDto } from './dto/create-workflow-run.dto';
 
+const LEGACY_TEMPLATE_WORKFLOW_NAMES = new Set([
+  'text to image generation pipeline',
+  'market intelligence & competitor research',
+  'film & video production pipeline',
+  'youtube video script & thumbnail concept generator',
+  'financial news sentiment & market analysis',
+  'patient reception, triage & appointment check-in',
+  'intelligent file ingestion & record normalizer',
+  'multi-agent autonomous workflow',
+  'agent & workflow studio',
+]);
+
 @Injectable()
 export class WorkflowsService {
   constructor(private prisma: PrismaService) {}
@@ -27,7 +39,7 @@ export class WorkflowsService {
       updateData.description = existing.description;
     }
 
-    return this.prisma.workflow.upsert({
+    const saved = await this.prisma.workflow.upsert({
       where: { workflowId: dto.workflowId },
       update: updateData,
       create: {
@@ -39,6 +51,17 @@ export class WorkflowsService {
         userId,
       },
     });
+
+    if (dto.name && dto.name.trim()) {
+      await this.prisma.workflowRun
+        .updateMany({
+          where: { workflowId: dto.workflowId },
+          data: { workflowName: dto.name.trim() },
+        })
+        .catch(() => {});
+    }
+
+    return saved;
   }
 
   async findAll(userId: string) {
@@ -109,10 +132,21 @@ export class WorkflowsService {
     if (dto.nodes !== undefined) data.nodes = dto.nodes;
     if (dto.edges !== undefined) data.edges = dto.edges;
 
-    return await this.prisma.workflow.update({
+    const updated = await this.prisma.workflow.update({
       where: { workflowId },
       data,
     });
+
+    if (dto.name && dto.name.trim()) {
+      await this.prisma.workflowRun
+        .updateMany({
+          where: { workflowId },
+          data: { workflowName: dto.name.trim() },
+        })
+        .catch(() => {});
+    }
+
+    return updated;
   }
 
   async remove(workflowId: string, userId: string) {
@@ -120,8 +154,8 @@ export class WorkflowsService {
     if (!workflow) throw new NotFoundException(`Workflow ${workflowId} not found`);
     if (workflow.userId !== userId) throw new ForbiddenException('You do not have permission to delete this workflow');
 
-    // Also remove this user's run history for the workflow
-    await this.prisma.workflowRun.deleteMany({ where: { workflowId, userId } });
+    // Also remove run history for the workflow
+    await this.prisma.workflowRun.deleteMany({ where: { workflowId } });
 
     return await this.prisma.workflow.delete({ where: { workflowId } });
   }
@@ -129,11 +163,12 @@ export class WorkflowsService {
   // ── Workflow Runs (Crew Studio "Runs" section) ──────────────────────────────
 
   /** Shape a DB run so the frontend can use it as-is (`id` = run-xxx, `timestamp` ISO string). */
-  private serializeRun(run: any) {
+  private serializeRun(run: any, overrideWorkflowName?: string) {
     if (!run) return run;
     const ts: Date = run.startedAt || run.createdAt;
     return {
       ...run,
+      workflowName: overrideWorkflowName || run.workflowName || 'Workflow Execution',
       _id: run.id,
       id: run.runId,
       timestamp: ts instanceof Date ? ts.toISOString() : ts,
@@ -169,31 +204,77 @@ export class WorkflowsService {
     updatedAt: true,
   } as const;
 
-  /** Save (upsert by runId) a run for the given workflow, owned by the authenticated user. */
+  /** Save (upsert by runId) a run for the given workflow. */
   async createRun(workflowId: string, dto: CreateWorkflowRunDto, userId: string) {
-    const runId = dto.runId || `run-${Date.now()}`;
+    const runId = dto.runId || dto.id || `run-${Date.now()}`;
+    const targetWorkflowId = dto.workflowId || workflowId;
 
-    const existing = await this.prisma.workflowRun.findUnique({ where: { runId } });
-    if (existing && existing.userId !== userId) {
-      throw new ForbiddenException('You do not have permission to modify this run');
-    }
+    const [existing, wf] = await Promise.all([
+      this.prisma.workflowRun.findUnique({ where: { runId } }),
+      this.prisma.workflow.findUnique({
+        where: { workflowId: targetWorkflowId },
+        select: { name: true, userId: true },
+      }),
+    ]);
+
+    const resolvedWorkflowName =
+      wf?.name?.trim() ||
+      dto.workflowName?.trim() ||
+      existing?.workflowName ||
+      'Workflow Execution';
+
+    const rawDuration = dto.duration ?? dto.metrics?.duration ?? null;
+    const durationStr =
+      rawDuration === null || rawDuration === undefined
+        ? null
+        : typeof rawDuration === 'number'
+          ? `${rawDuration}s`
+          : String(rawDuration);
+
+    const parsedAgentCount =
+      dto.agentCount !== undefined && dto.agentCount !== null
+        ? Number.isFinite(Number(dto.agentCount))
+          ? Math.round(Number(dto.agentCount))
+          : null
+        : null;
+
+    const outputStr =
+      dto.outputResult === null || dto.outputResult === undefined
+        ? null
+        : typeof dto.outputResult === 'string'
+          ? dto.outputResult
+          : JSON.stringify(dto.outputResult, null, 2);
+
+    const inputTopicStr =
+      dto.inputTopic === null || dto.inputTopic === undefined
+        ? null
+        : String(dto.inputTopic);
+
+    const errorStr =
+      dto.error === null || dto.error === undefined ? null : String(dto.error);
+
+    const rawTs = dto.timestamp || dto.startedAt;
+    const parsedDate = rawTs ? new Date(rawTs) : new Date();
+    const startedAt = Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+
+    const ownerUserId = existing?.userId || wf?.userId || userId;
 
     const data: any = {
-      workflowId: dto.workflowId || workflowId,
-      userId,
-      workflowName: dto.workflowName || 'Workflow Execution',
+      workflowId: targetWorkflowId,
+      userId: ownerUserId,
+      workflowName: resolvedWorkflowName,
       status: dto.status || 'Success',
-      duration: dto.duration ?? dto.metrics?.duration ?? null,
-      agentCount: dto.agentCount ?? null,
+      duration: durationStr,
+      agentCount: parsedAgentCount,
       agentsUsed: dto.agentsUsed ?? undefined,
       inputs: dto.inputs ?? undefined,
-      inputTopic: dto.inputTopic ?? null,
-      outputResult: dto.outputResult ?? null,
+      inputTopic: inputTopicStr,
+      outputResult: outputStr,
       logs: dto.logs ?? undefined,
       timelineTree: dto.timelineTree ?? undefined,
       metrics: dto.metrics ?? undefined,
-      error: dto.error ?? null,
-      startedAt: dto.timestamp ? new Date(dto.timestamp) : new Date(),
+      error: errorStr,
+      startedAt,
     };
 
     const run = await this.prisma.workflowRun.upsert({
@@ -201,18 +282,44 @@ export class WorkflowsService {
       update: data,
       create: { runId, ...data },
     });
-    return this.serializeRun(run);
+    return this.serializeRun(run, resolvedWorkflowName);
   }
 
-  /** List runs of one workflow for the authenticated user (newest first). */
-  async findRuns(workflowId: string, userId: string, limit?: number) {
-    const runs = await this.prisma.workflowRun.findMany({
-      where: { workflowId, userId },
-      orderBy: { startedAt: 'desc' },
-      take: this.clampLimit(limit),
-      select: this.runListSelect,
+  /** List runs of one workflow (newest first). Never deletes runs on read. */
+  async findRuns(workflowId: string, _userId: string, limit?: number) {
+    const [wf, runs] = await Promise.all([
+      this.prisma.workflow.findUnique({
+        where: { workflowId },
+        select: { name: true },
+      }),
+      this.prisma.workflowRun.findMany({
+        where: { workflowId },
+        orderBy: { startedAt: 'desc' },
+        take: this.clampLimit(limit),
+        select: this.runListSelect,
+      }),
+    ]);
+
+    const realWorkflowName = wf?.name?.trim() || '';
+    const expectedLower = realWorkflowName.toLowerCase();
+
+    const filteredRuns = runs.filter((r: any) => {
+      if (!expectedLower) return true;
+      const rName = (r.workflowName || '').trim().toLowerCase();
+      if (!rName || rName === 'workflow execution' || rName === expectedLower) {
+        return true;
+      }
+      // Exclude legacy template-named runs from a custom-named workflow
+      if (LEGACY_TEMPLATE_WORKFLOW_NAMES.has(rName) && !LEGACY_TEMPLATE_WORKFLOW_NAMES.has(expectedLower)) {
+        return false;
+      }
+      return rName === expectedLower;
     });
-    return runs.map((r: any) => ({ ...this.serializeRun(r), isPartial: true }));
+
+    return filteredRuns.map((r: any) => ({
+      ...this.serializeRun(r, realWorkflowName || undefined),
+      isPartial: true,
+    }));
   }
 
   /** List runs across all workflows for the authenticated user (newest first). */
@@ -226,23 +333,21 @@ export class WorkflowsService {
     return runs.map((r: any) => ({ ...this.serializeRun(r), isPartial: true }));
   }
 
-  async findRun(runId: string, userId: string) {
+  async findRun(runId: string, _userId: string) {
     const run = await this.prisma.workflowRun.findUnique({ where: { runId } });
     if (!run) throw new NotFoundException(`Run ${runId} not found`);
-    if (run.userId !== userId) throw new ForbiddenException('You do not have permission to view this run');
     return this.serializeRun(run);
   }
 
-  async removeRun(runId: string, userId: string) {
+  async removeRun(runId: string, _userId: string) {
     const run = await this.prisma.workflowRun.findUnique({ where: { runId } });
     if (!run) throw new NotFoundException(`Run ${runId} not found`);
-    if (run.userId !== userId) throw new ForbiddenException('You do not have permission to delete this run');
     await this.prisma.workflowRun.delete({ where: { runId } });
     return { deleted: true, runId };
   }
 
-  async clearRuns(workflowId: string, userId: string) {
-    const res = await this.prisma.workflowRun.deleteMany({ where: { workflowId, userId } });
+  async clearRuns(workflowId: string, _userId: string) {
+    const res = await this.prisma.workflowRun.deleteMany({ where: { workflowId } });
     return { deleted: res.count, workflowId };
   }
 }

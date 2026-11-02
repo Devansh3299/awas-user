@@ -10,6 +10,28 @@ interface MastraResponse {
   data: any;
 }
 
+function isEphemeralOrWorkflowAgent(agent: any): boolean {
+  if (!agent) return true;
+  const idStr = String(agent.id || agent.name || '').trim().toLowerCase();
+  const nameStr = String(agent.name || '').trim().toLowerCase();
+  if (idStr === 'agent-builder-agent' || idStr === 'studio-chat-agent') return false;
+  return (
+    agent.isWorkflowAgent === true ||
+    agent.metadata?.isWorkflowAgent === true ||
+    Boolean(agent.workflowId || agent.metadata?.workflowId) ||
+    String(agent.username || agent.metadata?.username || '').trim().toLowerCase() === 'crew studio' ||
+    idStr.startsWith('wf-') ||
+    idStr.startsWith('custom-wf-') ||
+    idStr.startsWith('agent-') ||
+    idStr.startsWith('agent_') ||
+    /^custom-(?:agent-)?\d{10,}(?:-\d+)?$/i.test(idStr) ||
+    idStr === 'custom-agent-researcher' ||
+    idStr === 'custom-agent-writer' ||
+    /^(?:wf|agent)[\s_-]\d+/i.test(nameStr) ||
+    /^custom agent\s*\((?:wf-|agent-|\d)/i.test(nameStr)
+  );
+}
+
 export function normalizeAgentExecutionBody(body: any) {
   const messages = body?.messages;
   if (!messages) {
@@ -67,7 +89,8 @@ export class AiProxyService {
       }
 
       const data = await response.json();
-      const list = Array.isArray(data) ? data : Object.values(data ?? {});
+      const rawList = Array.isArray(data) ? data : Object.values(data ?? {});
+      const list = rawList.filter((a) => !isEphemeralOrWorkflowAgent(a));
       this.agentCache = { data: list, timestamp: now };
       return list;
     } catch (err: any) {

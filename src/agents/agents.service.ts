@@ -5,6 +5,48 @@ import { UpdateAgentDto } from './dto/update-agent.dto';
 
 const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
 
+function isWorkflowScopedRecord(agent: any, workflowAgentNames: Set<string>, workflowAgentIds: Set<string>): boolean {
+  if (!agent) return true;
+  const schema = (agent.schema ?? {}) as Record<string, any>;
+  if (
+    schema.isWorkflowAgent === true ||
+    Boolean(schema.workflowId) ||
+    String(schema.username || '').trim().toLowerCase() === 'crew studio'
+  ) {
+    return true;
+  }
+
+  const nameLower = String(agent.name || '').trim().toLowerCase();
+  const idLower = String(agent.id || '').trim().toLowerCase();
+
+  if (
+    nameLower.startsWith('wf-') ||
+    nameLower.startsWith('custom-wf-') ||
+    nameLower.startsWith('agent-') ||
+    nameLower.startsWith('agent_') ||
+    /^custom-(?:agent-)?\d{10,}(?:-\d+)?$/i.test(nameLower) ||
+    nameLower === 'custom-agent-researcher' ||
+    nameLower === 'custom-agent-writer' ||
+    /^(?:wf|agent)[\s_-]\d+/i.test(nameLower) ||
+    /^custom agent\s*\((?:wf-|agent-|\d)/i.test(nameLower)
+  ) {
+    return true;
+  }
+
+  if (schema.source === 'repository') {
+    return false;
+  }
+
+  if (
+    (nameLower && workflowAgentNames.has(nameLower)) ||
+    (idLower && workflowAgentIds.has(idLower))
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
 @Injectable()
 export class AgentsService {
   constructor(private prisma: PrismaService) {}
@@ -29,7 +71,54 @@ export class AgentsService {
   }
 
   async findAll() {
-    return this.prisma.agent.findMany();
+    const [allAgents, workflows] = await Promise.all([
+      this.prisma.agent.findMany(),
+      this.prisma.workflow.findMany({ select: { nodes: true } }).catch(() => []),
+    ]);
+
+    const workflowAgentNames = new Set<string>();
+    const workflowAgentIds = new Set<string>();
+
+    for (const wf of workflows) {
+      let nodes: any = wf?.nodes;
+      if (typeof nodes === 'string') {
+        try {
+          nodes = JSON.parse(nodes);
+        } catch {
+          nodes = [];
+        }
+      }
+      if (Array.isArray(nodes)) {
+        for (const node of nodes) {
+          if (node?.type === 'agentNode') {
+            if (node.id) {
+              workflowAgentIds.add(String(node.id).trim().toLowerCase());
+            }
+            const rawName = node.data?.title || node.data?.name;
+            if (typeof rawName === 'string' && rawName.trim()) {
+              workflowAgentNames.add(rawName.trim().toLowerCase());
+            }
+          }
+        }
+      }
+    }
+
+    const staleIds: string[] = [];
+    const validAgents = allAgents.filter((agent) => {
+      if (isWorkflowScopedRecord(agent, workflowAgentNames, workflowAgentIds)) {
+        if (agent.id) staleIds.push(agent.id);
+        return false;
+      }
+      return true;
+    });
+
+    if (staleIds.length > 0) {
+      this.prisma.agent
+        .deleteMany({ where: { id: { in: staleIds } } })
+        .catch(() => {});
+    }
+
+    return validAgents;
   }
 
   async findOne(id: string) {
@@ -50,7 +139,7 @@ export class AgentsService {
   }
 
   async findByMastraId(mastraId: string) {
-    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(mastraId);
+    const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(idOrString(mastraId));
     let agent = null;
     if (isValidObjectId) {
       agent = await this.prisma.agent.findUnique({ where: { id: mastraId } });
@@ -136,6 +225,15 @@ export class AgentsService {
     }
     if (!existing) {
       existing = await this.prisma.agent.findFirst({ where: { name: id } });
+    }
+    if (!existing && id.startsWith('custom-')) {
+      const slugTarget = id.replace(/^custom-/, '').toLowerCase();
+      const all = await this.prisma.agent.findMany();
+      existing =
+        all.find(
+          (a) =>
+            a.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') === slugTarget,
+        ) || null;
     }
 
     if (existing) {
@@ -225,3 +323,6 @@ export class AgentsService {
   }
 }
 
+function idOrString(val: string): string {
+  return String(val || '');
+}

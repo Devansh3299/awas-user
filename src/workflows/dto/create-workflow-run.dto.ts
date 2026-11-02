@@ -1,10 +1,15 @@
-import { IsString, IsOptional, IsInt, IsDateString } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 
 export class CreateWorkflowRunDto {
   /** Frontend run ID (e.g. "run-1790000000000"). Generated server-side if omitted. */
   @IsString()
   @IsOptional()
   runId?: string;
+
+  /** Optional alias if frontend sends `id` directly. */
+  @IsString()
+  @IsOptional()
+  id?: string;
 
   /** Frontend workflow ID (e.g. "wf-1789470620862"). Taken from URL param if omitted. */
   @IsString()
@@ -19,13 +24,11 @@ export class CreateWorkflowRunDto {
   @IsOptional()
   status?: string;
 
-  @IsString()
   @IsOptional()
-  duration?: string;
+  duration?: any;
 
-  @IsInt()
   @IsOptional()
-  agentCount?: number;
+  agentCount?: any;
 
   @IsOptional()
   agentsUsed?: any;
@@ -33,13 +36,11 @@ export class CreateWorkflowRunDto {
   @IsOptional()
   inputs?: any;
 
-  @IsString()
   @IsOptional()
-  inputTopic?: string;
+  inputTopic?: any;
 
-  @IsString()
   @IsOptional()
-  outputResult?: string;
+  outputResult?: any;
 
   @IsOptional()
   logs?: any;
@@ -50,11 +51,33 @@ export class CreateWorkflowRunDto {
   @IsOptional()
   metrics?: any;
 
-  @IsString()
   @IsOptional()
-  error?: string;
+  error?: any;
 
-  @IsDateString()
   @IsOptional()
-  timestamp?: string;
+  timestamp?: any;
+
+  @IsOptional()
+  timeFormatted?: any;
+
+  @IsOptional()
+  syncStatus?: any;
+
+  @IsOptional()
+  isPartial?: any;
+
+  @IsOptional()
+  _id?: any;
+
+  @IsOptional()
+  userId?: any;
+
+  @IsOptional()
+  startedAt?: any;
+
+  @IsOptional()
+  createdAt?: any;
+
+  @IsOptional()
+  updatedAt?: any;
 }
