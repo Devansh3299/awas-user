@@ -25,6 +25,7 @@ model User {
   workflows        Workflow[]
   workflowRuns     WorkflowRun[]
   marketplaceItems MarketplaceItem[]
+  agents           Agent[]
   refreshToken     String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime?       @default(now()) @updatedAt
@@ -37,12 +38,15 @@ model User {
 }
 
 model Agent {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   description String?
   schema      Json
-  version     String   @default("1.0.0")
-  createdAt   DateTime @default(now())
+  version     String    @default("1.0.0")
+  userId      String?   @db.ObjectId
+  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime? @default(now()) @updatedAt
 }
 
 /// Per-user LLM provider configuration (API keys, endpoints, default model).
