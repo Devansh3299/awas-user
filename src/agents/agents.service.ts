@@ -2,8 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
-
-const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
+import { getMastraBaseUrl } from '../config/mastra.config';
 
 function isWorkflowScopedRecord(agent: any, workflowAgentNames: Set<string>, workflowAgentIds: Set<string>): boolean {
   if (!agent) return true;
@@ -350,7 +349,7 @@ export class AgentsService {
     tools?: string[];
   }) {
     try {
-      await fetch(`${MASTRA_BASE_URL}/internal/agents/register`, {
+      await fetch(`${getMastraBaseUrl()}/internal/agents/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -362,7 +361,7 @@ export class AgentsService {
 
   private async unregisterFromMastraRuntime(id: string) {
     try {
-      await fetch(`${MASTRA_BASE_URL}/internal/agents/${encodeURIComponent(id)}`, {
+      await fetch(`${getMastraBaseUrl()}/internal/agents/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
     } catch (err: any) {
