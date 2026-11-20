@@ -356,3 +356,37 @@ model WorkflowRun {
   @@index([userId, workflowId])
   @@map("workflowRun")
 }
+
+model MarketplaceInstall {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  itemId      String
+  itemType    String   @default("agent") // "agent" | "workflow"
+  ownerId     String?  @db.ObjectId
+  installedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, itemId])
+  @@index([userId, itemType])
+  @@map("marketplaceInstall")
+}
+
+model AgentUpdateRequest {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  itemId         String
+  agentName      String
+  requesterId    String   @db.ObjectId
+  requesterEmail String?
+  requesterName  String?
+  ownerId        String?  @db.ObjectId
+  title          String
+  message        String
+  status         String   @default("pending") // "pending" | "reviewed" | "resolved"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([requesterId])
+  @@index([itemId])
+  @@map("agentUpdateRequest")
+}

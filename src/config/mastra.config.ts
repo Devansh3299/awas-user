@@ -4,9 +4,9 @@
  */
 export function getMastraBaseUrl(): string {
   return (
+    process.env.MASTRA_API_URL ||
     process.env.MASTRA_BASE_URL ||
     process.env.MASTRA_ENDPOINT ||
-    process.env.MASTRA_API_URL ||
     'http://127.0.0.1:4111'
   ).replace(/\/+$/, '');
 }

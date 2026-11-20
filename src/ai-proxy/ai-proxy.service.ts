@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokensService } from '../tokens/tokens.service';
 import { Request } from 'express';
@@ -153,6 +158,9 @@ export class AiProxyService {
             ...agent,
             modelId: agent.modelId || storedModelName,
             provider: agent.provider || storedProvider,
+            authorId: stored.authorId ?? agent.authorId ?? null,
+            userId: stored.userId ? String(stored.userId) : (stored.metadata?.userId || stored.authorId || null),
+            organizationId: stored.organizationId ? String(stored.organizationId) : (stored.metadata?.organizationId || null),
             storedStatus: stored.status,
             activeVersionId: stored.activeVersionId,
             updatedAt: stored.updatedAt || agent.updatedAt,
@@ -170,6 +178,214 @@ export class AiProxyService {
       if (this.agentCache) return this.agentCache.data;
       throw new BadRequestException(`Failed to reach Platform Engine: ${err.message}`);
     }
+  }
+
+  /**
+   * Returns agents scoped to the current user's personal Repository:
+   * - Agents owned by userId (ownerId / authorId / metadata.userId)
+   * - Agents installed from the Marketplace by userId
+   * - Hidden internal system co-pilots (studio-chat-agent, agent-builder-agent)
+   */
+  async listScopedAgents(userId?: string, forceRefresh = false) {
+    const allAgents = await this.listAgents(forceRefresh);
+    if (!userId) {
+      return [];
+    }
+
+    const [installedRows, publishedRows] = await Promise.all([
+      (this.prisma as any).marketplaceInstall
+        .findMany({
+          where: { userId, itemType: 'agent' },
+          select: { itemId: true, ownerId: true },
+        })
+        .catch(() => []),
+      (this.prisma as any).marketplaceItem
+        .findMany({
+          where: { type: 'agent', isPublished: true },
+          select: { itemId: true, userId: true },
+        })
+        .catch(() => []),
+    ]);
+
+    const installedIds = new Set<string>(installedRows.map((r: any) => String(r.itemId)));
+    const publishedMap = new Map<string, string | null>();
+    for (const p of publishedRows) {
+      publishedMap.set(String(p.itemId), p.userId ? String(p.userId) : null);
+    }
+
+    const uid = String(userId);
+    const result: any[] = [];
+
+    for (const agent of allAgents) {
+      const idStr = String(agent.id || '');
+      const isSystem =
+        idStr === 'agent-builder-agent' ||
+        idStr === 'studio-chat-agent';
+
+      const resolvedOwnerId =
+        agent.userId ||
+        agent.authorId ||
+        agent.metadata?.userId ||
+        publishedMap.get(idStr) ||
+        null;
+
+      const isOwner = Boolean(resolvedOwnerId && String(resolvedOwnerId) === uid);
+      const isInstalled = installedIds.has(idStr);
+      const isPublishedToMarketplace = publishedMap.has(idStr);
+
+      if (isSystem || isOwner || isInstalled) {
+        result.push({
+          ...agent,
+          ownerId: resolvedOwnerId ? String(resolvedOwnerId) : null,
+          isOwner,
+          isInstalled,
+          isPublishedToMarketplace,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Enforces strict ownership: only the original ownerId/authorId can edit, delete, or re-publish.
+   */
+  async assertAgentOwnership(req: Request, agentId: string): Promise<void> {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('Authentication required to modify agents.');
+    }
+
+    const baseUrl = getMastraBaseUrl();
+    const encodedId = encodeURIComponent(agentId);
+
+    const [storedRes, dbAgent] = await Promise.all([
+      fetch(`${baseUrl}/api/stored/agents/${encodedId}`, {
+        headers: { 'Content-Type': 'application/json' },
+      })
+        .then(async (r) => (r.ok ? this.safeParseResponse(r) : null))
+        .catch(() => null),
+      this.prisma.agent
+        .findFirst({ where: { OR: [{ name: agentId }, ...(/^[0-9a-fA-F]{24}$/.test(agentId) ? [{ id: agentId }] : [])] } })
+        .catch(() => null),
+    ]);
+
+    const ownerId =
+      storedRes?.authorId ||
+      storedRes?.userId ||
+      storedRes?.metadata?.userId ||
+      dbAgent?.userId ||
+      null;
+
+    if (ownerId && String(ownerId) !== String(userId)) {
+      throw new ForbiddenException('Only the original owner can edit, delete, or re-publish this agent.');
+    }
+  }
+
+  /**
+   * Clones/duplicates an existing or installed agent, assigning the current user as the new ownerId.
+   */
+  async cloneAgentForUser(req: Request, sourceAgentId: string): Promise<MastraResponse> {
+    const user = (req as any).user;
+    if (!user?.id) {
+      throw new UnauthorizedException('Authentication required to clone an agent.');
+    }
+
+    const baseUrl = getMastraBaseUrl();
+    const detailsRes = await this.getAgentDetails(req, sourceAgentId).catch(() => null);
+    const source = detailsRes?.data;
+
+    let dbUserName = user.email ? user.email.split('@')[0] : 'Creator';
+    try {
+      const dbUser = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: { name: true, email: true },
+      });
+      if (dbUser) {
+        dbUserName = dbUser.name || (dbUser.email ? dbUser.email.split('@')[0] : dbUserName);
+      }
+    } catch {}
+
+    const baseName = (req.body?.name || `${source?.name || sourceAgentId} (Copy)`).trim();
+    const slugBase = baseName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '')
+      .slice(0, 40) || 'agent';
+    const newId = `custom-${slugBase}-${Date.now()}`;
+
+    const toolsRecord: Record<string, any> = {};
+    if (source?.storedTools && typeof source.storedTools === 'object') {
+      Object.assign(toolsRecord, source.storedTools);
+    } else if (source?.tools && typeof source.tools === 'object') {
+      const toolVals = Array.isArray(source.tools) ? source.tools : Object.values(source.tools);
+      for (const t of toolVals) {
+        const tid = typeof t === 'string' ? t : t?.id || t?.name;
+        if (tid) toolsRecord[tid] = { description: typeof t === 'object' ? t.description : undefined };
+      }
+    }
+
+    const storedPayload = {
+      id: newId,
+      name: baseName,
+      description: source?.description || '',
+      instructions: source?.instructions || source?.initialInstructions || `You are ${baseName}, an autonomous AI specialist.`,
+      authorId: String(user.id),
+      model: source?.storedModel && !Array.isArray(source.storedModel)
+        ? source.storedModel
+        : { provider: 'lm-studio', name: 'google/gemma-4-12b-qat' },
+      ...(Object.keys(toolsRecord).length > 0 ? { tools: toolsRecord } : {}),
+      ...(source?.defaultOptions ? { defaultOptions: source.defaultOptions } : {}),
+      metadata: {
+        source: 'repository',
+        userId: String(user.id),
+        ownerId: String(user.id),
+        username: dbUserName,
+        ownerEmail: user.email || '',
+        clonedFrom: sourceAgentId,
+      },
+    };
+
+    const createRes = await fetch(`${baseUrl}/api/stored/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(storedPayload),
+    });
+    const createdData = await this.safeParseResponse(createRes);
+
+    // Also persist in AWAS Prisma Agent table so both stores stay in sync
+    await this.prisma.agent
+      .create({
+        data: {
+          name: baseName,
+          description: source?.description || '',
+          userId: String(user.id),
+          schema: {
+            instructions: storedPayload.instructions,
+            systemPrompt: storedPayload.instructions,
+            tools: Object.keys(toolsRecord),
+            modelId: source?.modelId || source?.model || 'google/gemma-4-12b-qat',
+            source: 'repository',
+            clonedFrom: sourceAgentId,
+            mastraId: newId,
+          },
+        },
+      })
+      .catch(() => null);
+
+    this.invalidateAgentCache();
+
+    return {
+      status: createRes.ok ? 201 : createRes.status,
+      data: {
+        ...(createdData && typeof createdData === 'object' ? createdData : {}),
+        id: createdData?.id || newId,
+        name: baseName,
+        ownerId: String(user.id),
+        isOwner: true,
+        isInstalled: false,
+      },
+    };
   }
 
   async getAgentDetails(req: Request, agentId: string): Promise<MastraResponse> {
@@ -190,6 +406,18 @@ export class AiProxyService {
         .catch(() => ({ ok: false, status: 502, data: null })),
     ]);
 
+    const currentUserId = (req as any).user?.id ? String((req as any).user.id) : null;
+    const [installRow, publishedRow] = currentUserId
+      ? await Promise.all([
+          (this.prisma as any).marketplaceInstall
+            .findUnique({ where: { userId_itemId: { userId: currentUserId, itemId: agentId } } })
+            .catch(() => null),
+          (this.prisma as any).marketplaceItem
+            .findUnique({ where: { itemId: agentId }, select: { isPublished: true, userId: true } })
+            .catch(() => null),
+        ])
+      : [null, null];
+
     if (runtimeRes.status >= 200 && runtimeRes.status < 300 && runtimeRes.data) {
       const stored = storedRes.ok ? storedRes.data : null;
       if (stored && typeof stored === 'object') {
@@ -199,6 +427,10 @@ export class AiProxyService {
             : undefined;
         const storedProvider =
           stored.model && !Array.isArray(stored.model) ? stored.model.provider : undefined;
+        const resolvedOwnerId =
+          stored.userId
+            ? String(stored.userId)
+            : (stored.metadata?.userId || stored.authorId || (publishedRow?.userId ? String(publishedRow.userId) : null));
         return {
           status: runtimeRes.status,
           data: {
@@ -209,6 +441,17 @@ export class AiProxyService {
             storedStatus: stored.status,
             activeVersionId: stored.activeVersionId,
             resolvedVersionId: stored.resolvedVersionId,
+            authorId: stored.authorId ?? runtimeRes.data.authorId ?? null,
+            userId: resolvedOwnerId,
+            ownerId: resolvedOwnerId,
+            isOwner: Boolean(currentUserId && resolvedOwnerId && currentUserId === String(resolvedOwnerId)),
+            isInstalled: Boolean(installRow),
+            isPublishedToMarketplace: Boolean(publishedRow?.isPublished),
+            organizationId: stored.organizationId ? String(stored.organizationId) : (stored.metadata?.organizationId || null),
+            metadata: {
+              ...(runtimeRes.data.metadata ?? {}),
+              ...(stored.metadata ?? {}),
+            },
             defaultOptions: stored.defaultOptions,
             storedTools: stored.tools,
             storedModel: stored.model,

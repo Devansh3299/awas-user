@@ -25,7 +25,7 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'deep-search-workflow',
-    inputPayload: { query: 'Analyze incoming lead company website and executive contacts' },
+    inputPayload: { question: 'Analyze incoming lead company website and executive contacts' },
     executionMode: 'cloud',
     runs: 1482,
     successRuns: 1455,
@@ -43,7 +43,10 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'customer-feedback-workflow',
-    inputPayload: { feedback: 'High priority customer ticket triage and sentiment categorization' },
+    inputPayload: {
+      feedbackItems: ['High priority customer ticket triage and sentiment categorization'],
+      source: 'support-tickets',
+    },
     executionMode: 'cloud',
     runs: 893,
     successRuns: 888,
@@ -61,7 +64,9 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'csv-questions-workflow',
-    inputPayload: { query: 'Extract invoice line items, calculate totals, and check tax accuracy' },
+    inputPayload: {
+      csvData: 'invoice_id,customer,amount,tax,status\nINV-001,Acme Corp,1250.00,125.00,paid',
+    },
     executionMode: 'local',
     runs: 340,
     successRuns: 320,
@@ -97,7 +102,7 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'slack-workflow',
-    inputPayload: { channel: '#general', message: 'Daily workplace operations briefing compiled.' },
+    inputPayload: { channels: ['general'], messageLimit: 10 },
     executionMode: 'cloud',
     runs: 182,
     successRuns: 182,
@@ -393,9 +398,10 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
 
     try {
       if (automation.targetType === 'workflow') {
-        // Run Mastra workflow DAG via AiProxyService
+        // Run Mastra workflow DAG via AiProxyService with schema-compatible payload
         try {
-          const res = await this.aiProxyService.runWorkflow(automation.targetId, payload, userId);
+          const normalizedPayload = this.normalizeWorkflowPayload(automation.targetId, payload);
+          const res = await this.aiProxyService.runWorkflow(automation.targetId, normalizedPayload, userId);
           executionResult = res;
           isSuccess = true;
         } catch (wfErr: any) {
@@ -582,6 +588,41 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.trigger(automation.id, automation.userId, { inputPayload: payload }, 'webhook');
+  }
+
+  /**
+   * Normalize legacy automation inputPayload objects to match Mastra workflow inputSchemas.
+   */
+  private normalizeWorkflowPayload(workflowId: string, rawPayload: any): Record<string, any> {
+    const p = rawPayload && typeof rawPayload === 'object' ? { ...rawPayload } : {};
+    if (workflowId === 'customer-feedback-workflow') {
+      if (!Array.isArray(p.feedbackItems) || p.feedbackItems.length === 0) {
+        const single = typeof p.feedback === 'string' && p.feedback.trim()
+          ? p.feedback.trim()
+          : 'High priority customer ticket triage and sentiment categorization';
+        p.feedbackItems = [single];
+      }
+      if (!p.source) p.source = 'support-tickets';
+    } else if (workflowId === 'slack-workflow') {
+      if (!Array.isArray(p.channels) || p.channels.length === 0) {
+        const ch = typeof p.channel === 'string' && p.channel.trim()
+          ? p.channel.trim().replace(/^#/, '')
+          : 'general';
+        p.channels = [ch];
+      }
+      if (typeof p.messageLimit !== 'number') p.messageLimit = 10;
+    } else if (workflowId === 'deep-search-workflow') {
+      if (!p.question && typeof p.query === 'string') {
+        p.question = p.query;
+      }
+    } else if (workflowId === 'csv-questions-workflow') {
+      if (!p.csvData) {
+        p.csvData = typeof p.query === 'string' && p.query.includes(',')
+          ? p.query
+          : 'item,value\nsample,0';
+      }
+    }
+    return p;
   }
 
   /**

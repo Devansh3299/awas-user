@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { AiProxyService } from './ai-proxy.service';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import type { Request, Response } from 'express';
 import { Readable } from 'stream';
 
@@ -23,10 +24,12 @@ export class AiProxyController {
 
   // ── Agents Runtime ──────────────────────────────────────────────────────────
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('agents')
   async listAgents(@Req() req: Request, @Res() res: Response) {
     const forceRefresh = req.query?.refresh === 'true' || req.query?.refresh === '1';
-    const agents = await this.aiProxyService.listAgents(forceRefresh);
+    const userId = (req.user as any)?.id;
+    const agents = await this.aiProxyService.listScopedAgents(userId, forceRefresh);
     res.status(200).json(agents);
   }
 
@@ -42,6 +45,7 @@ export class AiProxyController {
     res.status(engineResponse.status).json(engineResponse.data);
   }
 
+  @UseGuards(OptionalJwtAuthGuard)
   @Get('agents/:id')
   async getAgentById(
     @Param('id') agentId: string,
@@ -52,28 +56,25 @@ export class AiProxyController {
     res.status(engineResponse.status).json(engineResponse.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('agents/:id/clone')
   async cloneAgent(
     @Param('id') agentId: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const engineResponse = await this.aiProxyService.proxyRequest(
-      req,
-      `/api/agents/${encodeURIComponent(agentId)}/clone`,
-      { invalidateAgents: true },
-    );
+    const engineResponse = await this.aiProxyService.cloneAgentForUser(req, agentId);
     res.status(engineResponse.status).json(engineResponse.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('agents/:id/model')
   async updateAgentModel(
     @Param('id') agentId: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    await this.aiProxyService.assertAgentOwnership(req, agentId);
     const engineResponse = await this.aiProxyService.proxyRequest(
       req,
       `/api/agents/${encodeURIComponent(agentId)}/model`,
@@ -82,13 +83,14 @@ export class AiProxyController {
     res.status(engineResponse.status).json(engineResponse.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('agents/:id/model/reset')
   async resetAgentModel(
     @Param('id') agentId: string,
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    await this.aiProxyService.assertAgentOwnership(req, agentId);
     const engineResponse = await this.aiProxyService.proxyRequest(
       req,
       `/api/agents/${encodeURIComponent(agentId)}/model/reset`,
@@ -341,9 +343,18 @@ export class AiProxyController {
     res.status(r.status).json(r.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('stored/agents')
   async createStoredAgent(@Req() req: Request, @Res() res: Response) {
+    const userId = String((req.user as any)?.id || '');
+    if (req.body && typeof req.body === 'object') {
+      req.body.authorId = userId;
+      req.body.metadata = {
+        ...(req.body.metadata ?? {}),
+        userId,
+        ownerId: userId,
+      };
+    }
     const r = await this.aiProxyService.proxyRequest(req, '/api/stored/agents', { invalidateAgents: true });
     res.status(r.status).json(r.data);
   }
@@ -361,18 +372,20 @@ export class AiProxyController {
     res.status(r.status).json(r.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Patch('stored/agents/:storedAgentId')
   async updateStoredAgent(@Param('storedAgentId') id: string, @Req() req: Request, @Res() res: Response) {
+    await this.aiProxyService.assertAgentOwnership(req, id);
     const r = await this.aiProxyService.proxyRequest(req, `/api/stored/agents/${encodeURIComponent(id)}`, {
       invalidateAgents: true,
     });
     res.status(r.status).json(r.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Delete('stored/agents/:storedAgentId')
   async deleteStoredAgent(@Param('storedAgentId') id: string, @Req() req: Request, @Res() res: Response) {
+    await this.aiProxyService.assertAgentOwnership(req, id);
     const r = await this.aiProxyService.proxyRequest(req, `/api/stored/agents/${encodeURIComponent(id)}`, {
       invalidateAgents: true,
     });
@@ -392,9 +405,10 @@ export class AiProxyController {
     res.status(r.status).json(r.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('stored/agents/:agentId/versions')
   async createAgentVersion(@Param('agentId') agentId: string, @Req() req: Request, @Res() res: Response) {
+    await this.aiProxyService.assertAgentOwnership(req, agentId);
     const r = await this.aiProxyService.proxyRequest(req, `/api/stored/agents/${encodeURIComponent(agentId)}/versions`, {
       invalidateAgents: true,
     });
@@ -424,7 +438,7 @@ export class AiProxyController {
     res.status(r.status).json(r.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('stored/agents/:agentId/versions/:versionId/activate')
   async activateAgentVersion(
     @Param('agentId') agentId: string,
@@ -432,6 +446,7 @@ export class AiProxyController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    await this.aiProxyService.assertAgentOwnership(req, agentId);
     const r = await this.aiProxyService.proxyRequest(
       req,
       `/api/stored/agents/${encodeURIComponent(agentId)}/versions/${encodeURIComponent(versionId)}/activate`,
@@ -440,7 +455,7 @@ export class AiProxyController {
     res.status(r.status).json(r.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Post('stored/agents/:agentId/versions/:versionId/restore')
   async restoreAgentVersion(
     @Param('agentId') agentId: string,
@@ -448,6 +463,7 @@ export class AiProxyController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    await this.aiProxyService.assertAgentOwnership(req, agentId);
     const r = await this.aiProxyService.proxyRequest(
       req,
       `/api/stored/agents/${encodeURIComponent(agentId)}/versions/${encodeURIComponent(versionId)}/restore`,
@@ -456,7 +472,7 @@ export class AiProxyController {
     res.status(r.status).json(r.data);
   }
 
-  @UseGuards(OptionalJwtAuthGuard)
+  @UseGuards(JwtAuthGuard)
   @Delete('stored/agents/:agentId/versions/:versionId')
   async deleteAgentVersion(
     @Param('agentId') agentId: string,
@@ -464,6 +480,7 @@ export class AiProxyController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    await this.aiProxyService.assertAgentOwnership(req, agentId);
     const r = await this.aiProxyService.proxyRequest(
       req,
       `/api/stored/agents/${encodeURIComponent(agentId)}/versions/${encodeURIComponent(versionId)}`,

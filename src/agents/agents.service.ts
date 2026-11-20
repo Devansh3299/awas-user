@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
@@ -195,20 +195,13 @@ export class AgentsService {
     const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
     let existing = null;
     if (isValidObjectId) {
-      existing = await this.prisma.agent.findFirst({
-        where: {
-          id,
-          ...(userId ? { userId } : {}),
-        },
-      });
+      existing = await this.prisma.agent.findFirst({ where: { id } });
     }
     if (!existing) {
-      existing = await this.prisma.agent.findFirst({
-        where: {
-          name: id,
-          ...(userId ? { userId } : {}),
-        },
-      });
+      existing = await this.prisma.agent.findFirst({ where: { name: id } });
+    }
+    if (existing?.userId && userId && String(existing.userId) !== String(userId)) {
+      throw new ForbiddenException('Only the original owner can edit this agent.');
     }
 
     let agentRecord;
@@ -256,20 +249,13 @@ export class AgentsService {
     const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
     let existing = null;
     if (isValidObjectId) {
-      existing = await this.prisma.agent.findFirst({
-        where: {
-          id,
-          ...(userId ? { userId } : {}),
-        },
-      });
+      existing = await this.prisma.agent.findFirst({ where: { id } });
     }
     if (!existing) {
-      existing = await this.prisma.agent.findFirst({
-        where: {
-          name: id,
-          ...(userId ? { userId } : {}),
-        },
-      });
+      existing = await this.prisma.agent.findFirst({ where: { name: id } });
+    }
+    if (existing?.userId && userId && String(existing.userId) !== String(userId)) {
+      throw new ForbiddenException('Only the original owner can edit this agent.');
     }
     if (!existing && id.startsWith('custom-')) {
       const slugTarget = id.replace(/^custom-/, '').toLowerCase();
