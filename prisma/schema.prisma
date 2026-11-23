@@ -25,6 +25,7 @@ model User {
   workflows        Workflow[]
   workflowRuns     WorkflowRun[]
   marketplaceItems MarketplaceItem[]
+  agents           Agent[]
   refreshToken     String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime?       @default(now()) @updatedAt
@@ -36,13 +37,47 @@ model User {
   chatThreads      ChatThread[]
 }
 
+type AgentOwnerInfo {
+  name  String?
+  email String?
+}
+
+type AgentInstallRecord {
+  userId      String   @db.ObjectId
+  userName    String?
+  userEmail   String?
+  installedAt DateTime @default(now())
+}
+
 model Agent {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  name        String
-  description String?
-  schema      Json
-  version     String   @default("1.0.0")
-  createdAt   DateTime @default(now())
+  id              String               @id @default(auto()) @map("_id") @db.ObjectId
+  mastraAgentId   String               @unique
+  name            String
+  description     String?              @default("")
+  category        String?              @default("Assistant")
+  price           String?              @default("Free")
+  rating          String?              @default("5.0")
+  tags            String[]             @default([])
+  schema          Json                 @default("{}")
+  version         String               @default("1.0.0")
+  ownerId         String?              @db.ObjectId
+  ownerUser       User?                @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  organizationId  String?              @db.ObjectId
+  organization    Organization?        @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  owner           AgentOwnerInfo?
+  isPublished     Boolean              @default(false)
+  publishedAt     DateTime?
+  lastPublishedAt DateTime?
+  installedBy     AgentInstallRecord[]
+  clonedFrom      String?
+  source          String               @default("repository") // "mastra" | "repository" | "clone"
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  @@index([ownerId])
+  @@index([organizationId])
+  @@index([isPublished])
+  @@map("Agent")
 }
 
 /// Per-user LLM provider configuration (API keys, endpoints, default model).
@@ -132,6 +167,7 @@ model Organization {
   industry  String?
   logoUrl   String?
   users     User[]
+  agents    Agent[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -351,4 +387,24 @@ model WorkflowRun {
   @@index([userId])
   @@index([userId, workflowId])
   @@map("workflowRun")
+}
+
+model AgentUpdateRequest {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  mastraAgentId  String
+  agentName      String
+  requesterId    String   @db.ObjectId
+  requesterEmail String?
+  requesterName  String?
+  ownerId        String?  @db.ObjectId
+  title          String
+  message        String
+  status         String   @default("pending") // "pending" | "reviewed" | "resolved"
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([requesterId])
+  @@index([mastraAgentId])
+  @@map("agentUpdateRequest")
 }

@@ -2,16 +2,10 @@ import { Module } from '@nestjs/common';
 import { MarketplaceController } from './marketplace.controller';
 import { MarketplaceService } from './marketplace.service';
 import { PrismaModule } from '../prisma/prisma.module';
-import { JwtModule } from '@nestjs/jwt';
+import { AgentsModule } from '../agents/agents.module';
 
 @Module({
-  imports: [
-    PrismaModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET || 'super-secret-key-123',
-      signOptions: { expiresIn: '1d' },
-    }),
-  ],
+  imports: [PrismaModule, AgentsModule],
   controllers: [MarketplaceController],
   providers: [MarketplaceService],
   exports: [MarketplaceService],

@@ -2,89 +2,130 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Body,
   Param,
   Delete,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { MarketplaceService } from './marketplace.service';
 import { PublishMarketplaceItemDto } from './dto/publish-marketplace-item.dto';
-import { JwtService } from '@nestjs/jwt';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 
 @Controller('marketplace')
 export class MarketplaceController {
-  constructor(
-    private readonly marketplaceService: MarketplaceService,
-    private readonly jwtService: JwtService,
-  ) {}
+  constructor(private readonly marketplaceService: MarketplaceService) {}
 
   /**
-   * Helper to optionally extract authenticated user from Authorization header.
+   * Public (optionally enriched for logged-in user):
+   * Lists all published agents (`isPublished: true`) and workflows across all users.
    */
-  private extractAuthUser(req: any) {
-    try {
-      const authHeader = req.headers?.authorization;
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.substring(7);
-        const decoded: any = this.jwtService.decode(token);
-        if (decoded?.sub || decoded?.id) {
-          return {
-            id: decoded.sub || decoded.id,
-            email: decoded.email,
-            role: decoded.role,
-          };
-        }
-      }
-    } catch {
-      // ignore token decode errors and proceed gracefully
-    }
-    return null;
-  }
-
-  /**
-   * Public: List all published marketplace items (workflows & agents).
-   */
+  @UseGuards(OptionalJwtAuthGuard)
   @Get()
   findAll(
+    @Req() req: any,
     @Query('type') type?: string,
     @Query('category') category?: string,
     @Query('search') search?: string,
   ) {
-    return this.marketplaceService.findAll({ type, category, search });
+    return this.marketplaceService.findAll({ type, category, search }, req.user?.id);
   }
 
   /**
-   * Public / Authenticated: Publish an agent or workflow to the marketplace.
+   * Authenticated: List all agents installed by the current user (`installedBy`).
    */
+  @UseGuards(JwtAuthGuard)
+  @Get('installed')
+  getInstalled(@Req() req: any) {
+    return this.marketplaceService.getInstalledItems(req.user);
+  }
+
+  /**
+   * Authenticated: List update requests relevant to the current user.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Get('update-requests')
+  listUpdateRequests(@Req() req: any, @Query('itemId') itemId?: string) {
+    return this.marketplaceService.listUpdateRequests(req.user, itemId);
+  }
+
+  /**
+   * Authenticated: Owner updates request status (`pending` | `reviewed` | `resolved`).
+   */
+  @UseGuards(JwtAuthGuard)
+  @Patch('update-requests/:requestId')
+  updateRequestStatus(
+    @Param('requestId') requestId: string,
+    @Body() body: { status: string },
+    @Req() req: any,
+  ) {
+    return this.marketplaceService.updateRequestStatus(requestId, body?.status, req.user);
+  }
+
+  /**
+   * Authenticated (Owner-only): Publish or re-publish an agent/workflow to Marketplace.
+   */
+  @UseGuards(JwtAuthGuard)
   @Post('publish')
   publish(@Body() dto: PublishMarketplaceItemDto, @Req() req: any) {
-    const authUser = this.extractAuthUser(req);
-    return this.marketplaceService.publish(dto, authUser);
+    return this.marketplaceService.publish(dto, req.user);
   }
 
-  /**
-   * Alias: POST /marketplace
-   */
+  @UseGuards(JwtAuthGuard)
   @Post()
   create(@Body() dto: PublishMarketplaceItemDto, @Req() req: any) {
-    const authUser = this.extractAuthUser(req);
-    return this.marketplaceService.publish(dto, authUser);
+    return this.marketplaceService.publish(dto, req.user);
   }
 
   /**
-   * Public: View single marketplace item by ID.
+   * Authenticated: Install a published agent into the user's Agent Repository (`installedBy`).
    */
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/install')
+  install(@Param('id') id: string, @Req() req: any) {
+    return this.marketplaceService.installItem(id, req.user);
+  }
+
+  /**
+   * Authenticated: Uninstall a Marketplace agent from the user's Agent Repository.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Delete(':id/install')
+  uninstall(@Param('id') id: string, @Req() req: any) {
+    return this.marketplaceService.uninstallItem(id, req.user);
+  }
+
+  /**
+   * Authenticated: Submit an update/change request directly to the original owner.
+   */
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/request-update')
+  requestUpdate(
+    @Param('id') id: string,
+    @Body() body: { title?: string; message?: string; agentName?: string },
+    @Req() req: any,
+  ) {
+    return this.marketplaceService.createUpdateRequest(id, body, req.user);
+  }
+
+  /**
+   * Public: View single published marketplace item.
+   */
+  @UseGuards(OptionalJwtAuthGuard)
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.marketplaceService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req: any) {
+    return this.marketplaceService.findOne(id, req.user?.id);
   }
 
   /**
-   * Remove or unpublish an item.
+   * Authenticated (Owner-only): Unpublish / remove an item from the marketplace.
    */
+  @UseGuards(JwtAuthGuard)
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.marketplaceService.remove(id);
+  remove(@Param('id') id: string, @Req() req: any) {
+    return this.marketplaceService.remove(id, req.user);
   }
 }
