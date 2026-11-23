@@ -25,7 +25,6 @@ model User {
   workflows        Workflow[]
   workflowRuns     WorkflowRun[]
   marketplaceItems MarketplaceItem[]
-  agents           Agent[]
   refreshToken     String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime?       @default(now()) @updatedAt
@@ -38,15 +37,12 @@ model User {
 }
 
 model Agent {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   description String?
   schema      Json
-  version     String    @default("1.0.0")
-  userId      String?   @db.ObjectId
-  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime? @default(now()) @updatedAt
+  version     String   @default("1.0.0")
+  createdAt   DateTime @default(now())
 }
 
 /// Per-user LLM provider configuration (API keys, endpoints, default model).
@@ -355,38 +351,4 @@ model WorkflowRun {
   @@index([userId])
   @@index([userId, workflowId])
   @@map("workflowRun")
-}
-
-model MarketplaceInstall {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  userId      String   @db.ObjectId
-  itemId      String
-  itemType    String   @default("agent") // "agent" | "workflow"
-  ownerId     String?  @db.ObjectId
-  installedAt DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@unique([userId, itemId])
-  @@index([userId, itemType])
-  @@map("marketplaceInstall")
-}
-
-model AgentUpdateRequest {
-  id             String   @id @default(auto()) @map("_id") @db.ObjectId
-  itemId         String
-  agentName      String
-  requesterId    String   @db.ObjectId
-  requesterEmail String?
-  requesterName  String?
-  ownerId        String?  @db.ObjectId
-  title          String
-  message        String
-  status         String   @default("pending") // "pending" | "reviewed" | "resolved"
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  @@index([ownerId])
-  @@index([requesterId])
-  @@index([itemId])
-  @@map("agentUpdateRequest")
 }

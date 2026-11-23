@@ -29,8 +29,4 @@ export class CreateAgentDto {
   @IsString()
   @IsOptional()
   username?: string;
-
-  @IsString()
-  @IsOptional()
-  userId?: string;
 }

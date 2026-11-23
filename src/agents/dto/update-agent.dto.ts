@@ -29,8 +29,4 @@ export class UpdateAgentDto {
   @IsString()
   @IsOptional()
   username?: string;
-
-  @IsString()
-  @IsOptional()
-  userId?: string;
 }

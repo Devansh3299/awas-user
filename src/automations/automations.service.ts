@@ -25,7 +25,7 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'deep-search-workflow',
-    inputPayload: { question: 'Analyze incoming lead company website and executive contacts' },
+    inputPayload: { query: 'Analyze incoming lead company website and executive contacts' },
     executionMode: 'cloud',
     runs: 1482,
     successRuns: 1455,
@@ -43,10 +43,7 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'customer-feedback-workflow',
-    inputPayload: {
-      feedbackItems: ['High priority customer ticket triage and sentiment categorization'],
-      source: 'support-tickets',
-    },
+    inputPayload: { feedback: 'High priority customer ticket triage and sentiment categorization' },
     executionMode: 'cloud',
     runs: 893,
     successRuns: 888,
@@ -64,9 +61,7 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'csv-questions-workflow',
-    inputPayload: {
-      csvData: 'invoice_id,customer,amount,tax,status\nINV-001,Acme Corp,1250.00,125.00,paid',
-    },
+    inputPayload: { query: 'Extract invoice line items, calculate totals, and check tax accuracy' },
     executionMode: 'local',
     runs: 340,
     successRuns: 320,
@@ -102,7 +97,7 @@ const SEED_TEMPLATES = [
     timezone: 'UTC',
     targetType: 'workflow',
     targetId: 'slack-workflow',
-    inputPayload: { channels: ['general'], messageLimit: 10 },
+    inputPayload: { channel: '#general', message: 'Daily workplace operations briefing compiled.' },
     executionMode: 'cloud',
     runs: 182,
     successRuns: 182,
@@ -156,7 +151,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private prisma: PrismaService,
     private aiProxyService: AiProxyService,
-  ) { }
+  ) {}
 
   onModuleInit() {
     // Start background ticker to check scheduled automations every 60 seconds
@@ -212,11 +207,11 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     const avgSuccessRate =
       automationsWithRuns.length > 0
         ? Number(
-          (
-            automationsWithRuns.reduce((sum, a) => sum + (a.successRate || 100), 0) /
-            automationsWithRuns.length
-          ).toFixed(1),
-        )
+            (
+              automationsWithRuns.reduce((sum, a) => sum + (a.successRate || 100), 0) /
+              automationsWithRuns.length
+            ).toFixed(1),
+          )
         : 100.0;
 
     return {
@@ -380,7 +375,7 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     const rawPayload = dto?.inputPayload || automation.inputPayload || {};
     const payload =
       automation.description &&
-        (!rawPayload?.query || rawPayload.query === 'Execute automated agent task')
+      (!rawPayload?.query || rawPayload.query === 'Execute automated agent task')
         ? { ...rawPayload, query: automation.description }
         : rawPayload;
     const effectiveTriggerSource = dto?.triggerSource || triggerSource;
@@ -403,10 +398,14 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
 
     try {
       if (automation.targetType === 'workflow') {
-        // Run Mastra workflow DAG via AiProxyService with schema-compatible payload
+        // Run Mastra workflow DAG via AiProxyService
         try {
-          const normalizedPayload = this.normalizeWorkflowPayload(automation.targetId, payload);
-          const res = await this.aiProxyService.runWorkflow(automation.targetId, normalizedPayload, userId);
+          const res = await this.aiProxyService.runWorkflow(
+            automation.targetId,
+            payload,
+            userId,
+            automation.executionMode,
+          );
           executionResult = res;
           isSuccess = true;
         } catch (wfErr: any) {
@@ -607,41 +606,6 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.trigger(automation.id, automation.userId, { inputPayload: payload }, 'webhook');
-  }
-
-  /**
-   * Normalize legacy automation inputPayload objects to match Mastra workflow inputSchemas.
-   */
-  private normalizeWorkflowPayload(workflowId: string, rawPayload: any): Record<string, any> {
-    const p = rawPayload && typeof rawPayload === 'object' ? { ...rawPayload } : {};
-    if (workflowId === 'customer-feedback-workflow') {
-      if (!Array.isArray(p.feedbackItems) || p.feedbackItems.length === 0) {
-        const single = typeof p.feedback === 'string' && p.feedback.trim()
-          ? p.feedback.trim()
-          : 'High priority customer ticket triage and sentiment categorization';
-        p.feedbackItems = [single];
-      }
-      if (!p.source) p.source = 'support-tickets';
-    } else if (workflowId === 'slack-workflow') {
-      if (!Array.isArray(p.channels) || p.channels.length === 0) {
-        const ch = typeof p.channel === 'string' && p.channel.trim()
-          ? p.channel.trim().replace(/^#/, '')
-          : 'general';
-        p.channels = [ch];
-      }
-      if (typeof p.messageLimit !== 'number') p.messageLimit = 10;
-    } else if (workflowId === 'deep-search-workflow') {
-      if (!p.question && typeof p.query === 'string') {
-        p.question = p.query;
-      }
-    } else if (workflowId === 'csv-questions-workflow') {
-      if (!p.csvData) {
-        p.csvData = typeof p.query === 'string' && p.query.includes(',')
-          ? p.query
-          : 'item,value\nsample,0';
-      }
-    }
-    return p;
   }
 
   /**
