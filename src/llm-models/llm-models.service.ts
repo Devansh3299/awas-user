@@ -2,8 +2,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SaveModelConfigDto } from './dto/save-model-config.dto';
 import { LlmConnectionService } from '../llm-connection/llm-connection.service';
-
-const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
+import { getMastraBaseUrl } from '../config/mastra.config';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Static provider catalogue — the source-of-truth list for the UI
@@ -120,7 +119,7 @@ export class LlmModelsService {
     // Attempt to fetch active model info from Mastra
     let mastraModels: any = {};
     try {
-      const resp = await fetch(`${MASTRA_BASE_URL}/custom/models`, {
+      const resp = await fetch(`${getMastraBaseUrl()}/custom/models`, {
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(5000),
       });

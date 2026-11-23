@@ -2,8 +2,7 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { TokensService } from '../tokens/tokens.service';
 import { SaveToolConnectionDto, TestToolConnectionDto } from './dto/tool-connection.dto';
-
-const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
+import { getMastraBaseUrl } from '../config/mastra.config';
 
 export interface ToolMetadata {
   id: string;
@@ -264,7 +263,7 @@ export class ToolsService {
       tools = this.toolsCache.data;
     } else {
       try {
-        const res = await fetch(`${MASTRA_BASE_URL}/api/tools`, {
+        const res = await fetch(`${getMastraBaseUrl()}/api/tools`, {
           headers: { 'Content-Type': 'application/json' },
           signal: AbortSignal.timeout(5000),
         });
@@ -342,7 +341,7 @@ export class ToolsService {
     } catch {}
 
     try {
-      const res = await fetch(`${MASTRA_BASE_URL}/api/tools/${toolId}/execute`, {
+      const res = await fetch(`${getMastraBaseUrl()}/api/tools/${toolId}/execute`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

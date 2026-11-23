@@ -1,9 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
-
-const MASTRA_BASE_URL = (process.env.MASTRA_BASE_URL || 'http://localhost:4111').replace(/\/+$/, '');
+import { getMastraBaseUrl } from '../config/mastra.config';
 
 function isWorkflowScopedRecord(agent: any, workflowAgentNames: Set<string>, workflowAgentIds: Set<string>): boolean {
   if (!agent) return true;
@@ -51,10 +50,20 @@ function isWorkflowScopedRecord(agent: any, workflowAgentNames: Set<string>, wor
 export class AgentsService {
   constructor(private prisma: PrismaService) {}
 
-  async create(createAgentDto: CreateAgentDto) {
+  async create(createAgentDto: CreateAgentDto, userId?: string) {
     const { schema, ...data } = createAgentDto;
+    const finalUserId = userId || createAgentDto.userId;
+    const schemaObj = (schema ?? {}) as Record<string, any>;
+    if (finalUserId && !schemaObj.userId) {
+      schemaObj.userId = finalUserId;
+    }
+
     const agent = await this.prisma.agent.create({
-      data: { ...data, schema: schema ?? {} },
+      data: {
+        ...data,
+        userId: finalUserId,
+        schema: schemaObj,
+      },
     });
 
     // Dual-write to Mastra dynamic runtime
@@ -70,10 +79,20 @@ export class AgentsService {
     return agent;
   }
 
-  async findAll() {
+  async findAll(userId?: string) {
+    if (!userId) {
+      return [];
+    }
+
     const [allAgents, workflows] = await Promise.all([
-      this.prisma.agent.findMany(),
-      this.prisma.workflow.findMany({ select: { nodes: true } }).catch(() => []),
+      this.prisma.agent.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.workflow.findMany({
+        where: { userId },
+        select: { nodes: true },
+      }).catch(() => []),
     ]);
 
     const workflowAgentNames = new Set<string>();
@@ -121,16 +140,22 @@ export class AgentsService {
     return validAgents;
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, userId?: string) {
     const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
     let agent = null;
     if (isValidObjectId) {
-      agent = await this.prisma.agent.findUnique({ where: { id } });
+      agent = await this.prisma.agent.findFirst({
+        where: {
+          id,
+          ...(userId ? { userId } : {}),
+        },
+      });
     }
     if (!agent) {
       agent = await this.prisma.agent.findFirst({
         where: {
-          OR: [{ name: id }],
+          name: id,
+          ...(userId ? { userId } : {}),
         },
       });
     }
@@ -159,22 +184,24 @@ export class AgentsService {
     return agent;
   }
 
-  async update(id: string, updateAgentDto: UpdateAgentDto) {
+  async update(id: string, updateAgentDto: UpdateAgentDto, userId?: string) {
     const { schema, ...data } = updateAgentDto;
     const updateData: any = { ...data };
     if (schema) updateData.schema = schema;
+    if (userId && !updateData.userId) {
+      updateData.userId = userId;
+    }
 
     const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
     let existing = null;
     if (isValidObjectId) {
-      existing = await this.prisma.agent.findUnique({ where: { id } });
+      existing = await this.prisma.agent.findFirst({ where: { id } });
     }
     if (!existing) {
-      existing = await this.prisma.agent.findFirst({
-        where: {
-          OR: [{ name: id }, { name: updateAgentDto.name || id }],
-        },
-      });
+      existing = await this.prisma.agent.findFirst({ where: { name: id } });
+    }
+    if (existing?.userId && userId && String(existing.userId) !== String(userId)) {
+      throw new ForbiddenException('Only the original owner can edit this agent.');
     }
 
     let agentRecord;
@@ -191,6 +218,7 @@ export class AgentsService {
           description: updateAgentDto.description || '',
           schema: schema ?? {},
           version: updateAgentDto.version || '1.0.0',
+          userId,
         },
       });
     }
@@ -217,18 +245,23 @@ export class AgentsService {
     return agentRecord;
   }
 
-  async remove(id: string) {
+  async remove(id: string, userId?: string) {
     const isValidObjectId = /^[0-9a-fA-F]{24}$/.test(id);
     let existing = null;
     if (isValidObjectId) {
-      existing = await this.prisma.agent.findUnique({ where: { id } });
+      existing = await this.prisma.agent.findFirst({ where: { id } });
     }
     if (!existing) {
       existing = await this.prisma.agent.findFirst({ where: { name: id } });
     }
+    if (existing?.userId && userId && String(existing.userId) !== String(userId)) {
+      throw new ForbiddenException('Only the original owner can edit this agent.');
+    }
     if (!existing && id.startsWith('custom-')) {
       const slugTarget = id.replace(/^custom-/, '').toLowerCase();
-      const all = await this.prisma.agent.findMany();
+      const all = await this.prisma.agent.findMany({
+        where: { ...(userId ? { userId } : {}) },
+      });
       existing =
         all.find(
           (a) =>
@@ -302,7 +335,7 @@ export class AgentsService {
     tools?: string[];
   }) {
     try {
-      await fetch(`${MASTRA_BASE_URL}/internal/agents/register`, {
+      await fetch(`${getMastraBaseUrl()}/internal/agents/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -314,7 +347,7 @@ export class AgentsService {
 
   private async unregisterFromMastraRuntime(id: string) {
     try {
-      await fetch(`${MASTRA_BASE_URL}/internal/agents/${encodeURIComponent(id)}`, {
+      await fetch(`${getMastraBaseUrl()}/internal/agents/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       });
     } catch (err: any) {
