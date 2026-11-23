@@ -125,8 +125,12 @@ export class AiProxyService {
     }
   }
 
-  async runWorkflow(workflowId: string, input: any, userId: string) {
-    const userLlm = await this.getUserLlmContext(userId);
+  async runWorkflow(workflowId: string, input: any, userId: string, executionMode?: string) {
+    const userLlm = await this.getUserLlmContext(userId, executionMode);
+    const resolvedProviderId = input?.providerId || userLlm.providerId;
+    const resolvedModelId = input?.modelId || userLlm.modelId;
+    const resolvedBaseUrl = input?.llmBaseUrl || userLlm.baseUrl;
+    const resolvedMode = executionMode || userLlm.executionMode;
 
     // 1. Create a run
     let runId: string;
@@ -162,19 +166,19 @@ export class AiProxyService {
         headers: {
           'Content-Type': 'application/json',
           'x-user-id': userId,
-          'x-provider-id': userLlm.providerId,
-          'x-model-id': input?.modelId || userLlm.modelId,
-          'x-llm-base-url': userLlm.baseUrl,
-          'x-execution-mode': userLlm.executionMode,
+          'x-provider-id': resolvedProviderId,
+          'x-model-id': resolvedModelId,
+          'x-llm-base-url': resolvedBaseUrl,
+          'x-execution-mode': resolvedMode,
         },
         body: JSON.stringify({
           inputData: input?.inputData ?? input?.input ?? input ?? {},
           requestContext: {
             'user-id': userId,
-            'provider-id': userLlm.providerId,
-            'model-id': input?.modelId || userLlm.modelId,
-            'llm-base-url': userLlm.baseUrl,
-            'execution-mode': userLlm.executionMode,
+            'provider-id': resolvedProviderId,
+            'model-id': resolvedModelId,
+            'llm-base-url': resolvedBaseUrl,
+            'execution-mode': resolvedMode,
           },
         }),
       });
@@ -193,6 +197,73 @@ export class AiProxyService {
     } catch (err: any) {
       throw new BadRequestException(`Failed to execute workflow: ${err.message}`);
     }
+  }
+
+  /**
+   * Executes a Mastra agent directly for scheduled/manual automations,
+   * respecting executionMode ('local' for LM Studio / Ollama, or 'cloud')
+   * and any explicit modelId/providerId in the payload.
+   */
+  async runAgent(agentId: string, input: any, userId: string, executionMode?: string) {
+    const userLlm = await this.getUserLlmContext(userId, executionMode);
+    const resolvedProviderId = input?.providerId || userLlm.providerId;
+    const resolvedModelId = input?.modelId || userLlm.modelId;
+    const resolvedBaseUrl = input?.llmBaseUrl || userLlm.baseUrl;
+    const resolvedMode = executionMode || userLlm.executionMode;
+
+    const promptText =
+      typeof input === 'string'
+        ? input
+        : input?.query || input?.prompt || input?.message || JSON.stringify(input ?? {});
+
+    const extraContext: Record<string, any> = {};
+    if (input && typeof input === 'object') {
+      for (const [k, v] of Object.entries(input)) {
+        if (k === 'query' || k === 'prompt' || k === 'message' || k === 'providerId' || k === 'modelId' || k === 'llmBaseUrl') {
+          continue;
+        }
+        if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+          extraContext[k] = v;
+        }
+      }
+    }
+
+    const res = await fetch(`${MASTRA_BASE_URL}/api/agents/${encodeURIComponent(agentId)}/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-id': userId,
+        'x-provider-id': resolvedProviderId,
+        'x-model-id': resolvedModelId,
+        'x-llm-base-url': resolvedBaseUrl,
+        'x-execution-mode': resolvedMode,
+      },
+      body: JSON.stringify({
+        messages: [{ role: 'user', content: promptText }],
+        requestContext: {
+          ...extraContext,
+          'user-id': userId,
+          'provider-id': resolvedProviderId,
+          'model-id': resolvedModelId,
+          'llm-base-url': resolvedBaseUrl,
+          'execution-mode': resolvedMode,
+        },
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || data?.message || `HTTP ${res.status} executing agent ${agentId}`);
+    }
+
+    return {
+      success: true,
+      agentId,
+      executionMode: resolvedMode,
+      providerId: resolvedProviderId,
+      modelId: resolvedModelId,
+      output: data?.text ?? data?.output ?? data,
+    };
   }
 
   async deductTokens(userId: string): Promise<void> {

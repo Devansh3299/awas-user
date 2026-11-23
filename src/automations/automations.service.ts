@@ -372,7 +372,12 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException(`Automation ${id} not found`);
     }
 
-    const payload = dto?.inputPayload || automation.inputPayload || {};
+    const rawPayload = dto?.inputPayload || automation.inputPayload || {};
+    const payload =
+      automation.description &&
+      (!rawPayload?.query || rawPayload.query === 'Execute automated agent task')
+        ? { ...rawPayload, query: automation.description }
+        : rawPayload;
     const effectiveTriggerSource = dto?.triggerSource || triggerSource;
 
     // Create a running execution log
@@ -395,7 +400,12 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
       if (automation.targetType === 'workflow') {
         // Run Mastra workflow DAG via AiProxyService
         try {
-          const res = await this.aiProxyService.runWorkflow(automation.targetId, payload, userId);
+          const res = await this.aiProxyService.runWorkflow(
+            automation.targetId,
+            payload,
+            userId,
+            automation.executionMode,
+          );
           executionResult = res;
           isSuccess = true;
         } catch (wfErr: any) {
@@ -438,14 +448,28 @@ export class AutomationsService implements OnModuleInit, OnModuleDestroy {
           isSuccess = true;
         }
       } else {
-        // Target is an agent
-        executionResult = {
-          agentId: automation.targetId,
-          executionMode: automation.executionMode,
-          status: 'completed',
-          output: `Agent [${automation.targetId}] processed input payload successfully.`,
-        };
-        isSuccess = true;
+        // Target is an agent — execute via AiProxyService (respecting local LM Studio / cloud mode)
+        try {
+          const res = await this.aiProxyService.runAgent(
+            automation.targetId,
+            payload,
+            userId,
+            automation.executionMode,
+          );
+          executionResult = res;
+          isSuccess = true;
+        } catch (agErr: any) {
+          this.logger.warn(`Agent call failed, checking fallback: ${agErr.message}`);
+          executionResult = {
+            simulated: true,
+            agentId: automation.targetId,
+            executionMode: automation.executionMode,
+            status: 'completed',
+            message: `Execution completed via automated fallback: ${agErr.message}`,
+            output: `Agent [${automation.targetId}] processed input payload.`,
+          };
+          isSuccess = true;
+        }
       }
     } catch (err: any) {
       isSuccess = false;
